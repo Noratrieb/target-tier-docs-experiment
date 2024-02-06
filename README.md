@@ -21,3 +21,4 @@ By adding yet another preprocessing step, we can solve all these problems.
 - Error when there is documentation that is not needed anymore, for example a removed target
 - Still keep the nice and easy-to-organize glob structure in the source
 - Use a unified structure for all the pages
+- This also allows us to put more dynamic values into the docs. For example, I put `--print cfg` there, isn't that pretty!?

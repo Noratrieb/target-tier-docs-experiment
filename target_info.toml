@@ -1,3 +1,5 @@
+# An actual implementation would probably split this over several files, however it is most conventient.
+
 [[target]]
 pattern = "*-apple-tvos"
 tier = 2
