@@ -2,7 +2,7 @@
 
 Experiment with automatically generating target tier docs.
 
-See <https://nilstrieb.github.io/target-tier-docs-experiment/>
+**View the deployment on <https://nilstrieb.github.io/target-tier-docs-experiment/>**
 
 ## Problems
 
