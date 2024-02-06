@@ -15,7 +15,7 @@ jobs:
           export RUSTC=$(rustup which rustc)
           cargo run
       - run: |
-          cd target && mdbook build
+          cd targets && mdbook build
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         if: ${{ github.ref == 'refs/heads/master' }}
