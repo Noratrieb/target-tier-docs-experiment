@@ -6,6 +6,7 @@ use std::{
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
+/// Information about a target obtained from `target_info.toml``.
 struct TargetDocs {
     name: String,
     maintainers: Vec<String>,
@@ -60,6 +61,7 @@ fn main() {
     eprintln!("Finished generating target docs");
 }
 
+/// Renders a single target markdown file from the information obtained.
 fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
     let mut doc = format!("# {}\n**Tier: {}**", target.name, target.tier);
 
@@ -117,6 +119,7 @@ fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String
     doc
 }
 
+/// Renders the non-target files like `SUMMARY.md` that depend on the target.
 fn render_static(targets: &[&str]) {
     std::fs::write(
         format!("targets/src/SUMMARY.md"),
@@ -151,6 +154,8 @@ But as you might notice, all targets are actually present with a stub :3.
     ",
     )
     .unwrap();
+
+    // TODO: Render the nice table showing off all targets and their tier.
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -189,6 +194,7 @@ fn load_target_info_patterns() -> Vec<TargetPatternEntry> {
         .collect()
 }
 
+/// Gets the target information from `target_info.toml` by applying all patterns that match.
 fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
     let mut tier = None;
     let mut maintainers = Vec::new();
@@ -243,10 +249,12 @@ fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Target
     }
 }
 
+/// Information about a target obtained from rustc.
 struct RustcTargetInfo {
     target_cfgs: Vec<(String, String)>,
 }
 
+/// Get information about a target from rustc.
 fn rustc_target_info(rustc: &Path, target: &str) -> RustcTargetInfo {
     let cfgs = rustc_stdout(rustc, &["--print", "cfg", "--target", target]);
     let target_cfgs = cfgs
