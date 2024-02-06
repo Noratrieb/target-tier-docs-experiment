@@ -139,9 +139,15 @@ fn render_static(targets: &[&str]) {
         "\
 # platform support generated
 
-This is an experiment of what target tier documentation could look like.
+This is an experiment of what generated target tier documentation could look like.
 
-See https://github.com/Nilstrieb/target-tier-docs-experiment for the source.
+See <https://github.com/Nilstrieb/target-tier-docs-experiment> for the source.
+The README of the repo contains more information about the motivation and benefits.
+
+Targets of interest with information filled out are any tvos targets like [aarch64-apple-tvos](./aarch64-apple-tvos.md)
+and [powerpc64-ibm-aix](./powerpc64-ibm-aix.md).
+
+But as you might notice, all targets are actually present with a stub :3.
     ",
     )
     .unwrap();

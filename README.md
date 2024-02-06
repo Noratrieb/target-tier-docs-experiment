@@ -2,6 +2,8 @@
 
 Experiment with automatically generating target tier docs.
 
+See <https://nilstrieb.github.io/target-tier-docs-experiment/>
+
 ## Problems
 
 Currenly, the [target tier docs](https://doc.rust-lang.org/rustc/platform-support.html) are hard to navigate.
