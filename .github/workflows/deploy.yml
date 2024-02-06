@@ -12,6 +12,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build docs
         run: |
+          export RUSTC=$(rustup which rustc)
           cargo run
       - run: |
           cd target && mdbook build
