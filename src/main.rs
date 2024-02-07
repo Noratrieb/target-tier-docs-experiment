@@ -1,22 +1,29 @@
+mod parse;
+
 use std::{
     io,
     path::{Path, PathBuf},
     process::Command,
 };
 
+use parse::ParsedTargetInfoFile;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /// Information about a target obtained from `target_info.toml``.
 struct TargetDocs {
     name: String,
     maintainers: Vec<String>,
-    requirements: Option<String>,
-    testing: Option<String>,
-    building_the_target: Option<String>,
-    cross_compilation: Option<String>,
-    building_rust_programs: Option<String>,
-    tier: u8,
+    sections: Vec<(String, String)>,
+    tier: String,
 }
+
+const SECTIONS: &[&str] = &[
+    "Requirements",
+    "Testing",
+    "Building",
+    "Cross compilation",
+    "Building Rust programs",
+];
 
 fn main() {
     let rustc =
@@ -31,7 +38,11 @@ fn main() {
         e @ _ => e.unwrap(),
     }
 
-    let mut info_patterns = load_target_info_patterns();
+    let mut info_patterns = parse::load_target_infos(Path::new("target_info"))
+        .unwrap()
+        .into_iter()
+        .map(|info| TargetPatternEntry { info, used: false })
+        .collect::<Vec<_>>();
 
     eprintln!("Collecting rustc information");
     let rustc_infos = targets
@@ -92,19 +103,18 @@ fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String
 
     doc.push_str(&maintainers_str);
 
-    let mut section = |value: &Option<String>, name| {
+    for section_name in SECTIONS {
+        let value = target
+            .sections
+            .iter()
+            .find(|(name, _)| name == section_name);
+
         let section_str = match value {
-            Some(value) => format!("## {name}\n{value}\n"),
-            None => format!("## {name}\nUnknown.\n"),
+            Some((name, value)) => format!("## {name}\n{value}\n"),
+            None => format!("## {section_name}\nUnknown.\n"),
         };
         doc.push_str(&section_str)
-    };
-
-    section(&target.requirements, "Requirements");
-    section(&target.testing, "Testing");
-    section(&target.building_the_target, "Building");
-    section(&target.cross_compilation, "Cross Compilation");
-    section(&target.building_rust_programs, "Building Rust Programs");
+    }
 
     let cfg_text = rustc_info
         .target_cfgs
@@ -114,7 +124,8 @@ fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String
         .join("\n");
     let cfg_text =
         format!("This target defines the following target-specific cfg values:\n{cfg_text}\n");
-    section(&Some(cfg_text), "cfg");
+
+    doc.push_str(&format!("## cfg\n{cfg_text}\n"));
 
     doc
 }
@@ -158,51 +169,16 @@ But as you might notice, all targets are actually present with a stub :3.
     // TODO: Render the nice table showing off all targets and their tier.
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TargetInfoTable {
-    target: Vec<TargetInfoPattern>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TargetInfoPattern {
-    pattern: String,
-    #[serde(default)]
-    maintainers: Vec<String>,
-    tier: Option<u8>,
-    requirements: Option<String>,
-    testing: Option<String>,
-    building_the_target: Option<String>,
-    cross_compilation: Option<String>,
-    building_rust_programs: Option<String>,
-}
-
 struct TargetPatternEntry {
-    info: TargetInfoPattern,
+    info: ParsedTargetInfoFile,
     used: bool,
-}
-
-fn load_target_info_patterns() -> Vec<TargetPatternEntry> {
-    let file = include_str!("../target_info.toml");
-    let table = toml::from_str::<TargetInfoTable>(file).unwrap();
-
-    table
-        .target
-        .into_iter()
-        .map(|info| TargetPatternEntry { info, used: false })
-        .collect()
 }
 
 /// Gets the target information from `target_info.toml` by applying all patterns that match.
 fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
     let mut tier = None;
     let mut maintainers = Vec::new();
-    let mut requirements = None;
-    let mut testing = None;
-    let mut building_the_target = None;
-    let mut cross_compilation = None;
-    let mut building_rust_programs = None;
+    let mut sections = Vec::new();
 
     for target_pattern in info_patterns {
         if glob_match::glob_match(&target_pattern.info.pattern, target) {
@@ -211,41 +187,28 @@ fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Target
 
             maintainers.extend_from_slice(&target_pattern.maintainers);
 
-            fn set_once<T: Clone>(
-                target: &str,
-                pattern_value: &Option<T>,
-                to_insert: &mut Option<T>,
-                name: &str,
-            ) {
-                if let Some(pattern_value) = pattern_value {
-                    if to_insert.is_some() {
-                        panic!("target {target} inherits a {name} from multiple patterns, create a more specific pattern and add it there");
-                    }
-                    *to_insert = Some(pattern_value.clone());
+            if let Some(pattern_value) = &target_pattern.tier {
+                if tier.is_some() {
+                    panic!("target {target} inherits a tier from multiple patterns, create a more specific pattern and add it there");
                 }
+                tier = Some(pattern_value.clone());
             }
-            #[rustfmt::skip]
-            {
-                set_once(target, &target_pattern.tier, &mut tier, "tier");
-                set_once(target, &target_pattern.requirements, &mut requirements, "requirements");
-                set_once(target, &target_pattern.testing, &mut testing, "testing");
-                set_once(target, &target_pattern.building_the_target, &mut building_the_target, "building_the_target");
-                set_once(target, &target_pattern.cross_compilation, &mut cross_compilation, "cross_compilation");
-                set_once(target, &target_pattern.building_rust_programs, &mut building_rust_programs, "building_rust_programs");
-            };
+
+            for (section_name, content) in &target_pattern.sections {
+                if sections.iter().any(|(name, _)| name == section_name) {
+                    panic!("target {target} inherits the section {section_name} from multiple patterns, create a more specific pattern and add it there");
+                }
+                sections.push((section_name.clone(), content.clone()));
+            }
         }
     }
 
     TargetDocs {
         name: target.to_owned(),
         maintainers,
-        requirements,
-        testing,
-        building_the_target,
-        cross_compilation,
-        building_rust_programs,
         // tier: tier.expect(&format!("no tier found for target {target}")),
-        tier: tier.unwrap_or(0),
+        tier: tier.unwrap_or("UNKNOWN".to_owned()),
+        sections,
     }
 }
 
