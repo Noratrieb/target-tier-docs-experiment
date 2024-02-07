@@ -3,19 +3,32 @@
 use eyre::{bail, OptionExt, Result, WrapErr};
 use std::{fs::DirEntry, path::Path};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct ParsedTargetInfoFile {
     pub pattern: String,
     pub tier: Option<String>,
     pub maintainers: Vec<String>,
     pub sections: Vec<(String, String)>,
+    pub metadata: Vec<ParsedTargetMetadata>,
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Frontmatter {
     tier: Option<String>,
     #[serde(default)]
     maintainers: Vec<String>,
+    #[serde(default)]
+    metadata: Vec<ParsedTargetMetadata>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParsedTargetMetadata {
+    pub pattern: String,
+    pub notes: String,
+    pub std: String,
+    pub host: String,
 }
 
 pub fn load_target_infos(directory: &Path) -> Result<Vec<ParsedTargetInfoFile>> {
@@ -93,6 +106,7 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
         maintainers: frontmatter.maintainers,
         tier: frontmatter.tier,
         sections,
+        metadata: frontmatter.metadata,
     })
 }
 
@@ -130,7 +144,7 @@ mod tests {
 
         assert!(super::parse_file(name, content).is_err());
     }
-    
+
     #[test]
     fn parse_correctly() {
         let name = "cat-unknown-linux-gnu.md";

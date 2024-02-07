@@ -1,4 +1,4 @@
-use eyre::{Context, OptionExt, Result};
+use eyre::{bail, Context, OptionExt, Result};
 use std::{fs, path::Path};
 
 use crate::{is_in_rust_lang_rust, RustcTargetInfo, TargetDocs};
@@ -91,13 +91,13 @@ fn replace_section(prev_content: &str, section_name: &str, replacement: &str) ->
 }
 
 /// Renders the non-target files like `SUMMARY.md` that depend on the target.
-pub fn render_static(platform_support: &Path, targets: &[&str]) -> Result<()> {
-    let targets_file = platform_support.join("targets.md");
+pub fn render_static(src_output: &Path, targets: &[(TargetDocs, RustcTargetInfo)]) -> Result<()> {
+    let targets_file = src_output.join("platform-support").join("targets.md");
     let old_targets = fs::read_to_string(&targets_file).wrap_err("reading summary file")?;
 
     let target_list = targets
         .iter()
-        .map(|target| format!("- [{0}](targets/{0}.md)", target))
+        .map(|(target, _)| format!("- [{0}](targets/{0}.md)", target.name))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -127,6 +127,51 @@ pub fn render_static(platform_support: &Path, targets: &[&str]) -> Result<()> {
     }
 
     // TODO: Render the nice table showing off all targets and their tier.
+    let platform_support_main = src_output.join("platform-support.md");
+    let platform_support_main_old =
+        fs::read_to_string(&platform_support_main).wrap_err("reading platform-support.md")?;
+
+    let tier3_table =
+        render_table_with_host(targets.into_iter().filter(|target| target.0.tier == "3"))
+            .wrap_err("rendering tier 3 table")?;
+
+    let platform_support_main_new =
+        replace_section(&platform_support_main_old, "TIER3", &tier3_table)
+            .wrap_err("replacing platform support.md")?;
+
+    fs::write(platform_support_main, platform_support_main_new)
+        .wrap_err("writing platform-support.md")?;
 
     Ok(())
+}
+
+fn render_table_with_host<'a>(
+    targets: impl IntoIterator<Item = &'a (TargetDocs, RustcTargetInfo)>,
+) -> Result<String> {
+    let mut rows = Vec::new();
+
+    for (target, _) in targets {
+        let meta = target.metadata.as_ref();
+        let std = match meta.map(|meta| meta.std.as_str()) {
+            Some("true") => "✓",
+            Some("unknown") => "?",
+            Some("false") => " ",
+            None => "?",
+            _ => bail!("invalid value for std todo parse early"),
+        };
+        let host = match meta.map(|meta| meta.host.as_str()) {
+            Some("true") => "✓",
+            Some("unknown") => "?",
+            Some("false") => " ",
+            None => "?",
+            _ => bail!("invalid value for host todo parse early"),
+        };
+        let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
+        rows.push(format!(
+            "[`{0}`](platform-support/targets/{0}.md) | {std} | {host} | {notes}",
+            target.name
+        ));
+    }
+
+    Ok(rows.join("\n"))
 }

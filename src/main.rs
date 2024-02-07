@@ -17,6 +17,15 @@ struct TargetDocs {
     maintainers: Vec<String>,
     sections: Vec<(String, String)>,
     tier: String,
+    // TODO: Make this mandatory.
+    metadata: Option<TargetMetadata>,
+}
+
+/// Metadata for the table
+struct TargetMetadata {
+    notes: String,
+    std: String,
+    host: String,
 }
 
 const SECTIONS: &[&str] = &[
@@ -57,7 +66,14 @@ fn main() -> Result<()> {
     let mut info_patterns = parse::load_target_infos(Path::new(input_dir))
         .unwrap()
         .into_iter()
-        .map(|info| TargetPatternEntry { info, used: false })
+        .map(|info| {
+            let metadata_used = vec![false; info.metadata.len()];
+            TargetPatternEntry {
+                info,
+                used: false,
+                metadata_used,
+            }
+        })
         .collect::<Vec<_>>();
 
     eprintln!("Collecting rustc information");
@@ -66,16 +82,21 @@ fn main() -> Result<()> {
         .map(|target| rustc_target_info(&rustc, target))
         .collect::<Vec<_>>();
 
+    let targets = targets
+        .into_iter()
+        .map(|target| target_doc_info(&mut info_patterns, target))
+        .zip(rustc_infos)
+        .collect::<Vec<_>>();
+
     eprintln!("Rendering targets");
-    for (target, rustc_info) in std::iter::zip(&targets, rustc_infos) {
-        let info = target_info(&mut info_patterns, target);
-        let doc = render::render_target_md(&info, &rustc_info);
+    for (info, rustc_info) in &targets {
+        let doc = render::render_target_md(info, rustc_info);
 
         std::fs::write(
             Path::new(output_src)
                 .join("platform-support")
                 .join("targets")
-                .join(format!("{target}.md")),
+                .join(format!("{}.md", info.name)),
             doc,
         )
         .wrap_err("writing target file")?;
@@ -88,9 +109,21 @@ fn main() -> Result<()> {
                 target_pattern.info.pattern
             );
         }
+
+        for (used, meta) in
+            std::iter::zip(target_pattern.metadata_used, target_pattern.info.metadata)
+        {
+            if !used {
+                bail!(
+                    "in target pattern `{}`, the metadata pattern `{}` was never used",
+                    target_pattern.info.pattern,
+                    meta.pattern
+                );
+            }
+        }
     }
 
-    render::render_static(&Path::new(output_src).join("platform-support"), &targets)?;
+    render::render_static(Path::new(output_src), &targets)?;
 
     eprintln!("Finished generating target docs");
     Ok(())
@@ -99,18 +132,20 @@ fn main() -> Result<()> {
 struct TargetPatternEntry {
     info: ParsedTargetInfoFile,
     used: bool,
+    metadata_used: Vec<bool>,
 }
 
-/// Gets the target information from `target_info.toml` by applying all patterns that match.
-fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
+fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
     let mut tier = None;
     let mut maintainers = Vec::new();
     let mut sections = Vec::new();
 
-    for target_pattern in info_patterns {
-        if glob_match::glob_match(&target_pattern.info.pattern, target) {
-            target_pattern.used = true;
-            let target_pattern = &target_pattern.info;
+    let mut metadata = None;
+
+    for target_pattern_entry in info_patterns {
+        if glob_match::glob_match(&target_pattern_entry.info.pattern, target) {
+            target_pattern_entry.used = true;
+            let target_pattern = &target_pattern_entry.info;
 
             maintainers.extend_from_slice(&target_pattern.maintainers);
 
@@ -127,6 +162,20 @@ fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Target
                 }
                 sections.push((section_name.clone(), content.clone()));
             }
+
+            for (i, metadata_pattern) in target_pattern.metadata.iter().enumerate() {
+                if glob_match::glob_match(&metadata_pattern.pattern, target) {
+                    target_pattern_entry.metadata_used[i] = true;
+                    if metadata.is_some() {
+                        panic!("target {target} is assigned metadata from more than one pattern");
+                    }
+                    metadata = Some(TargetMetadata {
+                        notes: metadata_pattern.notes.clone(),
+                        host: metadata_pattern.host.clone(),
+                        std: metadata_pattern.std.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -136,6 +185,7 @@ fn target_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Target
         // tier: tier.expect(&format!("no tier found for target {target}")),
         tier: tier.unwrap_or("UNKNOWN".to_owned()),
         sections,
+        metadata,
     }
 }
 
