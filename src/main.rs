@@ -1,7 +1,8 @@
 mod parse;
+mod render;
 
 use std::{
-    fs, io,
+    io,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -68,7 +69,7 @@ fn main() -> Result<()> {
     eprintln!("Rendering targets");
     for (target, rustc_info) in std::iter::zip(&targets, rustc_infos) {
         let info = target_info(&mut info_patterns, target);
-        let doc = render_target_md(&info, &rustc_info);
+        let doc = render::render_target_md(&info, &rustc_info);
 
         std::fs::write(
             Path::new(output_src)
@@ -89,131 +90,9 @@ fn main() -> Result<()> {
         }
     }
 
-    render_static(&Path::new(output_src).join("platform-support"), &targets)?;
+    render::render_static(&Path::new(output_src).join("platform-support"), &targets)?;
 
     eprintln!("Finished generating target docs");
-    Ok(())
-}
-
-/// Renders a single target markdown file from the information obtained.
-fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
-    let mut doc = format!("# {}\n\n**Tier: {}**\n\n", target.name, target.tier);
-
-    doc.push_str("## Maintainers\n");
-
-    let maintainers_str = if target.maintainers.is_empty() {
-        "This target does not have any maintainers!\n".to_owned()
-    } else {
-        format!(
-            "This target is maintained by:\n{}\n",
-            target
-                .maintainers
-                .iter()
-                .map(|maintainer| {
-                    let maintainer = if maintainer.starts_with('@') && !maintainer.contains(" ") {
-                        format!(
-                            "[@{0}](https://github.com/{0})",
-                            maintainer.strip_prefix("@").unwrap()
-                        )
-                    } else {
-                        maintainer.to_owned()
-                    };
-
-                    format!("- {maintainer}")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
-
-    doc.push_str(&maintainers_str);
-
-    for section_name in SECTIONS {
-        let value = target
-            .sections
-            .iter()
-            .find(|(name, _)| name == section_name);
-
-        let section_str = match value {
-            Some((name, value)) => format!("## {name}\n{value}\n\n"),
-            None => format!("## {section_name}\nUnknown.\n\n"),
-        };
-        doc.push_str(&section_str)
-    }
-
-    let cfg_text = rustc_info
-        .target_cfgs
-        .iter()
-        .map(|(key, value)| format!("- `{key}` = `{value}`"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let cfg_text =
-        format!("This target defines the following target-specific cfg values:\n{cfg_text}\n");
-
-    doc.push_str(&format!("## cfg\n{cfg_text}\n"));
-
-    doc
-}
-
-/// Replaces inner part of the form
-/// `<!-- {section_name} SECTION START --><!-- {section_name} SECTION END -->`
-/// with replacement`.
-fn replace_section(prev_content: &str, section_name: &str, replacement: &str) -> Result<String> {
-    let magic_summary_start = format!("<!-- {section_name} SECTION START -->");
-    let magic_summary_end = format!("<!-- {section_name} SECTION END -->");
-
-    let (pre_target, target_and_after) = prev_content
-        .split_once(&magic_summary_start)
-        .ok_or_eyre("<!-- TARGET SECTION START --> not found")?;
-
-    let (_, post_target) = target_and_after
-        .split_once(&magic_summary_end)
-        .ok_or_eyre("<!-- TARGET SECTION START --> not found")?;
-
-    let new = format!(
-        "{pre_target}{magic_summary_start}\n{replacement}\n{magic_summary_end}{post_target}"
-    );
-    Ok(new)
-}
-
-/// Renders the non-target files like `SUMMARY.md` that depend on the target.
-fn render_static(platform_support: &Path, targets: &[&str]) -> Result<()> {
-    let targets_file = platform_support.join("targets.md");
-    let old_targets = fs::read_to_string(&targets_file).wrap_err("reading summary file")?;
-
-    let target_list = targets
-        .iter()
-        .map(|target| format!("- [{0}](targets/{0}.md)", target))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let new_targets =
-        replace_section(&old_targets, "TARGET", &target_list).wrap_err("replacing targets.md")?;
-
-    std::fs::write(targets_file, new_targets).wrap_err("writing targets.md")?;
-
-    if !is_in_rust_lang_rust() {
-        std::fs::write(
-            "targets/src/information.md",
-            "\
-    # platform support generated
-
-    This is an experiment of what generated target tier documentation could look like.
-
-    See <https://github.com/Nilstrieb/target-tier-docs-experiment> for the source.
-    The README of the repo contains more information about the motivation and benefits.
-
-    Targets of interest with information filled out are any tvos targets like [aarch64-apple-tvos](./aarch64-apple-tvos.md)
-    and [powerpc64-ibm-aix](./powerpc64-ibm-aix.md).
-
-    But as you might notice, all targets are actually present with a stub :3.
-        ",
-        )
-        .unwrap();
-    }
-
-    // TODO: Render the nice table showing off all targets and their tier.
-
     Ok(())
 }
 
