@@ -1,11 +1,32 @@
-use eyre::{bail, Context, OptionExt, Result};
+use eyre::{Context, OptionExt, Result};
 use std::{fs, path::Path};
 
-use crate::{is_in_rust_lang_rust, RustcTargetInfo, TargetDocs};
+use crate::{
+    is_in_rust_lang_rust,
+    parse::{Tier, TriStateBool},
+    RustcTargetInfo, TargetDocs,
+};
+
+impl TargetDocs {
+    fn has_host_tools(&self) -> bool {
+        self.metadata
+            .as_ref()
+            .map_or(false, |meta| meta.host == TriStateBool::True)
+    }
+}
 
 /// Renders a single target markdown file from the information obtained.
 pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
-    let mut doc = format!("# {}\n\n**Tier: {}**\n\n", target.name, target.tier);
+    let mut doc = format!(
+        "# {}\n\n**Tier: {}**\n\n",
+        target.name,
+        match target.tier {
+            Some(Tier::One) => "1",
+            Some(Tier::Two) => "2",
+            Some(Tier::Three) => "3",
+            None => "UNKNOWN",
+        }
+    );
 
     let mut section = |name: &str, content: &str| {
         doc.push_str("## ");
@@ -123,7 +144,7 @@ pub fn render_static(src_output: &Path, targets: &[(TargetDocs, RustcTargetInfo)
     But as you might notice, all targets are actually present with a stub :3.
         ",
         )
-        .unwrap();
+        .wrap_err("writing front page information about experiment")?;
     }
 
     // TODO: Render the nice table showing off all targets and their tier.
@@ -131,18 +152,48 @@ pub fn render_static(src_output: &Path, targets: &[(TargetDocs, RustcTargetInfo)
     let platform_support_main_old =
         fs::read_to_string(&platform_support_main).wrap_err("reading platform-support.md")?;
 
-    let tier3_table =
-        render_table_with_host(targets.into_iter().filter(|target| target.0.tier == "3"))
-            .wrap_err("rendering tier 3 table")?;
+    // needs footnotes...
+    //let tier1host_table = render_table(
+    //    targets
+    //        .into_iter()
+    //        .filter(|target| target.0.tier == Some(Tier::One)),
+    //)?;
+    // Tier 2 without host doesn't exist right now
+    // they all support std, obviously
+    //let tier2host_table = render_table_without_std this needs a better scheme??(
+    //    targets
+    //        .into_iter()
+    //        .filter(|target| target.0.tier == Some(Tier::Two) && target.0.has_host_tools()),
+    //)
+    //.wrap_err("rendering tier 2 table")?;
+    let tier2_table = render_table(
+        targets
+            .into_iter()
+            .filter(|target| target.0.tier == Some(Tier::Two) && !target.0.has_host_tools()),
+    )?;
+    let tier3_table = render_table_with_host(
+        targets
+            .into_iter()
+            .filter(|target| target.0.tier == Some(Tier::Three)),
+    )?;
 
-    let platform_support_main_new =
-        replace_section(&platform_support_main_old, "TIER3", &tier3_table)
-            .wrap_err("replacing platform support.md")?;
+    let content = platform_support_main_old;
+    let content = replace_section(&content, "TIER2", &tier2_table)
+        .wrap_err("replacing platform support.md")?;
+    let content = replace_section(&content, "TIER3", &tier3_table)
+        .wrap_err("replacing platform support.md")?;
 
-    fs::write(platform_support_main, platform_support_main_new)
-        .wrap_err("writing platform-support.md")?;
+    fs::write(platform_support_main, content).wrap_err("writing platform-support.md")?;
 
     Ok(())
+}
+
+fn render_table_tri_state_bool(bool: TriStateBool) -> &'static str {
+    match bool {
+        TriStateBool::True => "✓",
+        TriStateBool::False => " ",
+        TriStateBool::Unknown => "?",
+    }
 }
 
 fn render_table_with_host<'a>(
@@ -152,23 +203,36 @@ fn render_table_with_host<'a>(
 
     for (target, _) in targets {
         let meta = target.metadata.as_ref();
-        let std = match meta.map(|meta| meta.std.as_str()) {
-            Some("true") => "✓",
-            Some("unknown") => "?",
-            Some("false") => " ",
-            None => "?",
-            _ => bail!("invalid value for std todo parse early"),
-        };
-        let host = match meta.map(|meta| meta.host.as_str()) {
-            Some("true") => "✓",
-            Some("unknown") => "?",
-            Some("false") => " ",
-            None => "?",
-            _ => bail!("invalid value for host todo parse early"),
-        };
+        let std = meta
+            .map(|meta| render_table_tri_state_bool(meta.std))
+            .unwrap_or("?");
+        let host = meta
+            .map(|meta| render_table_tri_state_bool(meta.host))
+            .unwrap_or("?");
+
         let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
         rows.push(format!(
             "[`{0}`](platform-support/targets/{0}.md) | {std} | {host} | {notes}",
+            target.name
+        ));
+    }
+
+    Ok(rows.join("\n"))
+}
+
+fn render_table<'a>(
+    targets: impl IntoIterator<Item = &'a (TargetDocs, RustcTargetInfo)>,
+) -> Result<String> {
+    let mut rows = Vec::new();
+
+    for (target, _) in targets {
+        let meta = target.metadata.as_ref();
+        let std = meta
+            .map(|meta| render_table_tri_state_bool(meta.std))
+            .unwrap_or("?");
+        let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
+        rows.push(format!(
+            "[`{0}`](platform-support/targets/{0}.md) | {std} | {notes}",
             target.name
         ));
     }

@@ -8,7 +8,7 @@ use std::{
 };
 
 use eyre::{bail, Context, OptionExt, Result};
-use parse::ParsedTargetInfoFile;
+use parse::{ParsedTargetInfoFile, Tier, TriStateBool};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /// Information about a target obtained from `target_info.toml``.
@@ -16,7 +16,7 @@ struct TargetDocs {
     name: String,
     maintainers: Vec<String>,
     sections: Vec<(String, String)>,
-    tier: String,
+    tier: Option<Tier>,
     // TODO: Make this mandatory.
     metadata: Option<TargetMetadata>,
 }
@@ -24,8 +24,8 @@ struct TargetDocs {
 /// Metadata for the table
 struct TargetMetadata {
     notes: String,
-    std: String,
-    host: String,
+    std: TriStateBool,
+    host: TriStateBool,
 }
 
 const SECTIONS: &[&str] = &[
@@ -182,8 +182,7 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
     TargetDocs {
         name: target.to_owned(),
         maintainers,
-        // tier: tier.expect(&format!("no tier found for target {target}")),
-        tier: tier.unwrap_or("UNKNOWN".to_owned()),
+        tier,
         sections,
         metadata,
     }

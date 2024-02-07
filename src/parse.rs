@@ -1,34 +1,53 @@
 //! Suboptimal half-markdown parser that's just good-enough for this.
 
 use eyre::{bail, OptionExt, Result, WrapErr};
+use serde::Deserialize;
 use std::{fs::DirEntry, path::Path};
+
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+pub enum Tier {
+    #[serde(rename = "1")]
+    One,
+    #[serde(rename = "2")]
+    Two,
+    #[serde(rename = "3")]
+    Three,
+}
 
 #[derive(Debug)]
 pub struct ParsedTargetInfoFile {
     pub pattern: String,
-    pub tier: Option<String>,
+    pub tier: Option<Tier>,
     pub maintainers: Vec<String>,
     pub sections: Vec<(String, String)>,
     pub metadata: Vec<ParsedTargetMetadata>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Frontmatter {
-    tier: Option<String>,
+    tier: Option<Tier>,
     #[serde(default)]
     maintainers: Vec<String>,
     #[serde(default)]
     metadata: Vec<ParsedTargetMetadata>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParsedTargetMetadata {
     pub pattern: String,
     pub notes: String,
-    pub std: String,
-    pub host: String,
+    pub std: TriStateBool,
+    pub host: TriStateBool,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriStateBool {
+    True,
+    False,
+    Unknown,
 }
 
 pub fn load_target_infos(directory: &Path) -> Result<Vec<ParsedTargetInfoFile>> {
@@ -112,6 +131,8 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
 
 #[cfg(test)]
 mod tests {
+    use crate::parse::Tier;
+
     #[test]
     fn no_frontmatter() {
         let name = "archlinux-unknown-linux-gnu.md"; // arch linux is an arch, right?
@@ -171,7 +192,7 @@ But it should be possible.
 
         assert_eq!(info.maintainers, vec!["who maintains the cat?"]);
         assert_eq!(info.pattern, name);
-        assert_eq!(info.tier, Some("1".to_owned()));
+        assert_eq!(info.tier, Some(Tier::One));
         assert_eq!(
             info.sections,
             vec![
