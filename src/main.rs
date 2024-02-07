@@ -1,11 +1,12 @@
 mod parse;
 
 use std::{
-    io,
+    fs, io,
     path::{Path, PathBuf},
     process::Command,
 };
 
+use eyre::{bail, Context, OptionExt, Result};
 use parse::ParsedTargetInfoFile;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
@@ -25,20 +26,34 @@ const SECTIONS: &[&str] = &[
     "Building Rust programs",
 ];
 
-fn main() {
+fn is_in_rust_lang_rust() -> bool {
+    std::env::var("RUST_LANG_RUST") == Ok("1".to_owned())
+}
+
+fn main() -> Result<()> {
+    let args = std::env::args().collect::<Vec<_>>();
+    let input_dir = args
+        .get(1)
+        .ok_or_eyre("first argument must be path to directory containing source md files")?;
+    let output_src = args
+        .get(2)
+        .ok_or_eyre("second argument must be path to `src` output directory")?;
+
     let rustc =
         PathBuf::from(std::env::var("RUSTC").expect("must pass RUSTC env var pointing to rustc"));
 
     let targets = rustc_stdout(&rustc, &["--print", "target-list"]);
     let targets = targets.lines().collect::<Vec<_>>();
 
-    match std::fs::create_dir("targets/src") {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-        e @ _ => e.unwrap(),
+    if !is_in_rust_lang_rust() {
+        match std::fs::create_dir("targets/src") {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            e @ _ => e.unwrap(),
+        }
     }
 
-    let mut info_patterns = parse::load_target_infos(Path::new("target_info"))
+    let mut info_patterns = parse::load_target_infos(Path::new(input_dir))
         .unwrap()
         .into_iter()
         .map(|info| TargetPatternEntry { info, used: false })
@@ -55,32 +70,42 @@ fn main() {
         let info = target_info(&mut info_patterns, target);
         let doc = render_target_md(&info, &rustc_info);
 
-        std::fs::write(format!("targets/src/{target}.md"), doc).unwrap();
+        std::fs::write(
+            Path::new(output_src)
+                .join("platform-support")
+                .join("targets")
+                .join(format!("{target}.md")),
+            doc,
+        )
+        .wrap_err("writing target file")?;
     }
 
     for target_pattern in info_patterns {
         if !target_pattern.used {
-            panic!(
+            bail!(
                 "target pattern `{}` was never used",
                 target_pattern.info.pattern
             );
         }
     }
 
-    render_static(&targets);
+    render_static(&Path::new(output_src).join("platform-support"), &targets)?;
 
     eprintln!("Finished generating target docs");
+    Ok(())
 }
 
 /// Renders a single target markdown file from the information obtained.
 fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
-    let mut doc = format!("# {}\n**Tier: {}**", target.name, target.tier);
+    let mut doc = format!("# {}\n\n**Tier: {}**\n\n", target.name, target.tier);
+
+    doc.push_str("## Maintainers\n");
 
     let maintainers_str = if target.maintainers.is_empty() {
-        "\n## Maintainers\nThis target does not have any maintainers!\n".to_owned()
+        "This target does not have any maintainers!\n".to_owned()
     } else {
         format!(
-            "\n## Maintainers\nThis target is maintained by:\n{}\n",
+            "This target is maintained by:\n{}\n",
             target
                 .maintainers
                 .iter()
@@ -110,8 +135,8 @@ fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String
             .find(|(name, _)| name == section_name);
 
         let section_str = match value {
-            Some((name, value)) => format!("## {name}\n{value}\n"),
-            None => format!("## {section_name}\nUnknown.\n"),
+            Some((name, value)) => format!("## {name}\n{value}\n\n"),
+            None => format!("## {section_name}\nUnknown.\n\n"),
         };
         doc.push_str(&section_str)
     }
@@ -130,43 +155,66 @@ fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String
     doc
 }
 
+/// Replaces inner part of the form
+/// `<!-- {section_name} SECTION START --><!-- {section_name} SECTION END -->`
+/// with replacement`.
+fn replace_section(prev_content: &str, section_name: &str, replacement: &str) -> Result<String> {
+    let magic_summary_start = format!("<!-- {section_name} SECTION START -->");
+    let magic_summary_end = format!("<!-- {section_name} SECTION END -->");
+
+    let (pre_target, target_and_after) = prev_content
+        .split_once(&magic_summary_start)
+        .ok_or_eyre("<!-- TARGET SECTION START --> not found")?;
+
+    let (_, post_target) = target_and_after
+        .split_once(&magic_summary_end)
+        .ok_or_eyre("<!-- TARGET SECTION START --> not found")?;
+
+    let new = format!(
+        "{pre_target}{magic_summary_start}\n{replacement}\n{magic_summary_end}{post_target}"
+    );
+    Ok(new)
+}
+
 /// Renders the non-target files like `SUMMARY.md` that depend on the target.
-fn render_static(targets: &[&str]) {
-    std::fs::write(
-        format!("targets/src/SUMMARY.md"),
-        format!(
+fn render_static(platform_support: &Path, targets: &[&str]) -> Result<()> {
+    let targets_file = platform_support.join("targets.md");
+    let old_targets = fs::read_to_string(&targets_file).wrap_err("reading summary file")?;
+
+    let target_list = targets
+        .iter()
+        .map(|target| format!("- [{0}](targets/{0}.md)", target))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let new_targets =
+        replace_section(&old_targets, "TARGET", &target_list).wrap_err("replacing targets.md")?;
+
+    std::fs::write(targets_file, new_targets).wrap_err("writing targets.md")?;
+
+    if !is_in_rust_lang_rust() {
+        std::fs::write(
+            "targets/src/information.md",
             "\
-# All targets
-- [Info About This Thing](./information.md)
-{}
-",
-            targets
-                .iter()
-                .map(|target| format!("- [{0}](./{0}.md)", target))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        "targets/src/information.md",
-        "\
-# platform support generated
+    # platform support generated
 
-This is an experiment of what generated target tier documentation could look like.
+    This is an experiment of what generated target tier documentation could look like.
 
-See <https://github.com/Nilstrieb/target-tier-docs-experiment> for the source.
-The README of the repo contains more information about the motivation and benefits.
+    See <https://github.com/Nilstrieb/target-tier-docs-experiment> for the source.
+    The README of the repo contains more information about the motivation and benefits.
 
-Targets of interest with information filled out are any tvos targets like [aarch64-apple-tvos](./aarch64-apple-tvos.md)
-and [powerpc64-ibm-aix](./powerpc64-ibm-aix.md).
+    Targets of interest with information filled out are any tvos targets like [aarch64-apple-tvos](./aarch64-apple-tvos.md)
+    and [powerpc64-ibm-aix](./powerpc64-ibm-aix.md).
 
-But as you might notice, all targets are actually present with a stub :3.
-    ",
-    )
-    .unwrap();
+    But as you might notice, all targets are actually present with a stub :3.
+        ",
+        )
+        .unwrap();
+    }
 
     // TODO: Render the nice table showing off all targets and their tier.
+
+    Ok(())
 }
 
 struct TargetPatternEntry {
