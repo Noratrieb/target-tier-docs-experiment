@@ -40,6 +40,15 @@ pub struct ParsedTargetMetadata {
     pub notes: String,
     pub std: TriStateBool,
     pub host: TriStateBool,
+    #[serde(default)]
+    pub footnotes: Vec<Footnote>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Footnote {
+    pub name: String,
+    pub content: String,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Deserialize)]
@@ -84,25 +93,49 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
         .nth(1)
         .ok_or_eyre("missing frontmatter")?;
 
-    let frontmatter =
+    let frontmatter_line_count = frontmatter.lines().count() + 2; // 2 from ---
+
+    let mut frontmatter =
         serde_yaml::from_str::<Frontmatter>(frontmatter).wrap_err("invalid frontmatter")?;
+
+    frontmatter.metadata.iter_mut().for_each(|meta| {
+        meta.footnotes.iter_mut().for_each(|footnote| {
+            footnote.content = footnote.content.replace("\r\n", " ").replace("\n", " ")
+        })
+    });
+    let frontmatter = frontmatter;
 
     let body = frontmatter_splitter.next().ok_or_eyre("no body")?;
 
-    let mut sections = Vec::new();
+    let mut sections = Vec::<(String, String)>::new();
+    let mut in_codeblock = false;
 
-    for line in body.lines() {
-        if line.starts_with("#") {
-            if let Some(header) = line.strip_prefix("## ") {
+    for (idx, line) in body.lines().enumerate() {
+        let number = frontmatter_line_count + idx + 1; // 1 because "line numbers" are off by 1
+        if line.starts_with("```") {
+            in_codeblock ^= true; // toggle
+        } else if line.starts_with("#") {
+            if in_codeblock {
+                match sections.last_mut() {
+                    Some((_, content)) => {
+                        content.push_str(line);
+                        content.push('\n');
+                    }
+                    None if line.trim().is_empty() => {}
+                    None => {
+                        bail!("line {number} with content not allowed before the first heading")
+                    }
+                }
+            } else if let Some(header) = line.strip_prefix("## ") {
                 if !crate::SECTIONS.contains(&header) {
                     bail!(
-                        "`{header}` is not an allowed section name, must be one of {:?}",
+                        "on line {number}, `{header}` is not an allowed section name, must be one of {:?}",
                         super::SECTIONS
                     );
                 }
                 sections.push((header.to_owned(), String::new()));
             } else {
-                bail!("the only allowed headings are `## `");
+                bail!("on line {number}, the only allowed headings are `## `: `{line}`");
             }
         } else {
             match sections.last_mut() {

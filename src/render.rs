@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 
 use crate::{
     is_in_rust_lang_rust,
-    parse::{Tier, TriStateBool},
+    parse::{Footnote, Tier, TriStateBool},
     RustcTargetInfo, TargetDocs,
 };
 
@@ -147,45 +147,67 @@ pub fn render_static(src_output: &Path, targets: &[(TargetDocs, RustcTargetInfo)
         .wrap_err("writing front page information about experiment")?;
     }
 
-    // TODO: Render the nice table showing off all targets and their tier.
     let platform_support_main = src_output.join("platform-support.md");
     let platform_support_main_old =
         fs::read_to_string(&platform_support_main).wrap_err("reading platform-support.md")?;
+    let platform_support_main_new =
+        render_platform_support_tables(&platform_support_main_old, targets)?;
+    fs::write(platform_support_main, platform_support_main_new)
+        .wrap_err("writing platform-support.md")?;
 
-    // needs footnotes...
-    //let tier1host_table = render_table(
-    //    targets
-    //        .into_iter()
-    //        .filter(|target| target.0.tier == Some(Tier::One)),
-    //)?;
-    // Tier 2 without host doesn't exist right now
-    // they all support std, obviously
-    //let tier2host_table = render_table_without_std this needs a better scheme??(
-    //    targets
-    //        .into_iter()
-    //        .filter(|target| target.0.tier == Some(Tier::Two) && target.0.has_host_tools()),
-    //)
-    //.wrap_err("rendering tier 2 table")?;
+    Ok(())
+}
+
+impl Footnote {
+    fn reference(&self) -> String {
+        format!("[^{}]", self.name)
+    }
+}
+
+fn render_platform_support_tables(
+    content: &str,
+    targets: &[(TargetDocs, RustcTargetInfo)],
+) -> Result<String> {
+    let tier1host_table = render_table_awesome(
+        targets,
+        TierTable {
+            filter: |target| target.tier == Some(Tier::One),
+            include_host: false,
+            include_std: false,
+        },
+    )?;
+    let tier2host_table = render_table(
+        targets
+            .into_iter()
+            .filter(|target| target.0.tier == Some(Tier::Two) && target.0.has_host_tools()),
+        false,
+        false,
+    )?;
     let tier2_table = render_table(
         targets
             .into_iter()
             .filter(|target| target.0.tier == Some(Tier::Two) && !target.0.has_host_tools()),
+        true,
+        false,
     )?;
-    let tier3_table = render_table_with_host(
+    let tier3_table = render_table(
         targets
             .into_iter()
             .filter(|target| target.0.tier == Some(Tier::Three)),
+        true,
+        true,
     )?;
 
-    let content = platform_support_main_old;
+    let content = replace_section(&content, "TIER1HOST", &tier1host_table)
+        .wrap_err("replacing platform support.md")?;
+    let content = replace_section(&content, "TIER2HOST", &tier2host_table)
+        .wrap_err("replacing platform support.md")?;
     let content = replace_section(&content, "TIER2", &tier2_table)
         .wrap_err("replacing platform support.md")?;
     let content = replace_section(&content, "TIER3", &tier3_table)
         .wrap_err("replacing platform support.md")?;
 
-    fs::write(platform_support_main, content).wrap_err("writing platform-support.md")?;
-
-    Ok(())
+    Ok(content)
 }
 
 fn render_table_tri_state_bool(bool: TriStateBool) -> &'static str {
@@ -196,43 +218,110 @@ fn render_table_tri_state_bool(bool: TriStateBool) -> &'static str {
     }
 }
 
-fn render_table_with_host<'a>(
-    targets: impl IntoIterator<Item = &'a (TargetDocs, RustcTargetInfo)>,
+struct TierTable {
+    filter: fn(&TargetDocs) -> bool,
+    include_std: bool,
+    include_host: bool,
+}
+
+fn render_table_awesome<'a>(
+    targets: &[(TargetDocs, RustcTargetInfo)],
+    table: TierTable,
 ) -> Result<String> {
     let mut rows = Vec::new();
+    let mut all_footnotes = Vec::new();
+
+    let targets = targets
+        .into_iter()
+        .filter(|target| (table.filter)(&target.0));
 
     for (target, _) in targets {
         let meta = target.metadata.as_ref();
-        let std = meta
-            .map(|meta| render_table_tri_state_bool(meta.std))
-            .unwrap_or("?");
-        let host = meta
-            .map(|meta| render_table_tri_state_bool(meta.host))
-            .unwrap_or("?");
 
-        let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
+        let mut notes = meta
+            .map(|meta| meta.notes.as_str())
+            .unwrap_or("unknown")
+            .to_owned();
+
+        if meta.map_or(false, |meta| !meta.footnotes.is_empty()) {
+            let footnotes = &meta.unwrap().footnotes;
+            all_footnotes.extend(footnotes);
+            let footnotes_str = footnotes
+                .iter()
+                .map(|footnote| footnote.reference())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            notes = format!("{notes} {footnotes_str}");
+        }
+
+        let std = if table.include_std {
+            let std = meta
+                .map(|meta| render_table_tri_state_bool(meta.std))
+                .unwrap_or("?");
+            format!(" | {std}")
+        } else {
+            String::new()
+        };
+
+        let host = if table.include_host {
+            let host = meta
+                .map(|meta| render_table_tri_state_bool(meta.host))
+                .unwrap_or("?");
+            format!(" | {host}")
+        } else {
+            String::new()
+        };
+
         rows.push(format!(
-            "[`{0}`](platform-support/targets/{0}.md) | {std} | {host} | {notes}",
+            "[`{0}`](platform-support/targets/{0}.md){std}{host} | {notes}",
             target.name
         ));
     }
 
-    Ok(rows.join("\n"))
+    let mut result = rows.join("\n");
+
+    for footnote in all_footnotes {
+        result.push_str("\n\n");
+        result.push_str(&footnote.reference());
+        result.push_str(": ");
+        result.push_str(&footnote.content);
+    }
+
+    Ok(result)
 }
 
 fn render_table<'a>(
     targets: impl IntoIterator<Item = &'a (TargetDocs, RustcTargetInfo)>,
+    include_std: bool,
+    include_host: bool,
 ) -> Result<String> {
     let mut rows = Vec::new();
 
     for (target, _) in targets {
         let meta = target.metadata.as_ref();
-        let std = meta
-            .map(|meta| render_table_tri_state_bool(meta.std))
-            .unwrap_or("?");
+
         let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
+        let std = if include_std {
+            let std = meta
+                .map(|meta| render_table_tri_state_bool(meta.std))
+                .unwrap_or("?");
+            format!(" | {std}")
+        } else {
+            String::new()
+        };
+
+        let host = if include_host {
+            let host = meta
+                .map(|meta| render_table_tri_state_bool(meta.host))
+                .unwrap_or("?");
+            format!(" | {host}")
+        } else {
+            String::new()
+        };
+
         rows.push(format!(
-            "[`{0}`](platform-support/targets/{0}.md) | {std} | {notes}",
+            "[`{0}`](platform-support/targets/{0}.md){std}{host} | {notes}",
             target.name
         ));
     }

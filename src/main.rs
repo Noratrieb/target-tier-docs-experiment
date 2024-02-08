@@ -8,7 +8,7 @@ use std::{
 };
 
 use eyre::{bail, Context, OptionExt, Result};
-use parse::{ParsedTargetInfoFile, Tier, TriStateBool};
+use parse::{Footnote, ParsedTargetInfoFile, Tier, TriStateBool};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /// Information about a target obtained from `target_info.toml``.
@@ -26,12 +26,14 @@ struct TargetMetadata {
     notes: String,
     std: TriStateBool,
     host: TriStateBool,
+    footnotes: Vec<Footnote>,
 }
 
 const SECTIONS: &[&str] = &[
+    "Overview",
     "Requirements",
     "Testing",
-    "Building",
+    "Building the target",
     "Cross compilation",
     "Building Rust programs",
 ];
@@ -59,12 +61,12 @@ fn main() -> Result<()> {
         match std::fs::create_dir("targets/src") {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            e @ _ => e.unwrap(),
+            e @ _ => e.wrap_err("failed creating src dir")?,
         }
     }
 
     let mut info_patterns = parse::load_target_infos(Path::new(input_dir))
-        .unwrap()
+        .wrap_err("failed loading target_info")?
         .into_iter()
         .map(|info| {
             let metadata_used = vec![false; info.metadata.len()];
@@ -173,6 +175,7 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
                         notes: metadata_pattern.notes.clone(),
                         host: metadata_pattern.host.clone(),
                         std: metadata_pattern.std.clone(),
+                        footnotes: metadata_pattern.footnotes.clone(),
                     });
                 }
             }
