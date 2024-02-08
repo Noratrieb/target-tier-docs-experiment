@@ -168,44 +168,47 @@ fn render_platform_support_tables(
     content: &str,
     targets: &[(TargetDocs, RustcTargetInfo)],
 ) -> Result<String> {
-    let tier1host_table = render_table_awesome(
-        targets,
+    let replace_table = |content, name, tier_table| -> Result<String> {
+        let section_string = render_table(targets, tier_table)?;
+        replace_section(content, name, &section_string).wrap_err("replacing platform support.md")
+    };
+
+    let content = replace_table(
+        content,
+        "TIER1HOST",
         TierTable {
             filter: |target| target.tier == Some(Tier::One),
             include_host: false,
             include_std: false,
         },
     )?;
-    let tier2host_table = render_table(
-        targets
-            .into_iter()
-            .filter(|target| target.0.tier == Some(Tier::Two) && target.0.has_host_tools()),
-        false,
-        false,
+    let content = replace_table(
+        &content,
+        "TIER2HOST",
+        TierTable {
+            filter: |target| target.tier == Some(Tier::Two) && target.has_host_tools(),
+            include_host: false,
+            include_std: false,
+        },
     )?;
-    let tier2_table = render_table(
-        targets
-            .into_iter()
-            .filter(|target| target.0.tier == Some(Tier::Two) && !target.0.has_host_tools()),
-        true,
-        false,
+    let content = replace_table(
+        &content,
+        "TIER2",
+        TierTable {
+            filter: |target| target.tier == Some(Tier::Two) && !target.has_host_tools(),
+            include_host: false,
+            include_std: true,
+        },
     )?;
-    let tier3_table = render_table(
-        targets
-            .into_iter()
-            .filter(|target| target.0.tier == Some(Tier::Three)),
-        true,
-        true,
+    let content = replace_table(
+        &content,
+        "TIER3",
+        TierTable {
+            filter: |target| target.tier == Some(Tier::Three),
+            include_host: true,
+            include_std: true,
+        },
     )?;
-
-    let content = replace_section(&content, "TIER1HOST", &tier1host_table)
-        .wrap_err("replacing platform support.md")?;
-    let content = replace_section(&content, "TIER2HOST", &tier2host_table)
-        .wrap_err("replacing platform support.md")?;
-    let content = replace_section(&content, "TIER2", &tier2_table)
-        .wrap_err("replacing platform support.md")?;
-    let content = replace_section(&content, "TIER3", &tier3_table)
-        .wrap_err("replacing platform support.md")?;
 
     Ok(content)
 }
@@ -224,10 +227,7 @@ struct TierTable {
     include_host: bool,
 }
 
-fn render_table_awesome<'a>(
-    targets: &[(TargetDocs, RustcTargetInfo)],
-    table: TierTable,
-) -> Result<String> {
+fn render_table<'a>(targets: &[(TargetDocs, RustcTargetInfo)], table: TierTable) -> Result<String> {
     let mut rows = Vec::new();
     let mut all_footnotes = Vec::new();
 
@@ -289,42 +289,4 @@ fn render_table_awesome<'a>(
     }
 
     Ok(result)
-}
-
-fn render_table<'a>(
-    targets: impl IntoIterator<Item = &'a (TargetDocs, RustcTargetInfo)>,
-    include_std: bool,
-    include_host: bool,
-) -> Result<String> {
-    let mut rows = Vec::new();
-
-    for (target, _) in targets {
-        let meta = target.metadata.as_ref();
-
-        let notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown");
-        let std = if include_std {
-            let std = meta
-                .map(|meta| render_table_tri_state_bool(meta.std))
-                .unwrap_or("?");
-            format!(" | {std}")
-        } else {
-            String::new()
-        };
-
-        let host = if include_host {
-            let host = meta
-                .map(|meta| render_table_tri_state_bool(meta.host))
-                .unwrap_or("?");
-            format!(" | {host}")
-        } else {
-            String::new()
-        };
-
-        rows.push(format!(
-            "[`{0}`](platform-support/targets/{0}.md){std}{host} | {notes}",
-            target.name
-        ));
-    }
-
-    Ok(rows.join("\n"))
 }
