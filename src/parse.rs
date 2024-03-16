@@ -4,20 +4,9 @@ use eyre::{bail, OptionExt, Result, WrapErr};
 use serde::Deserialize;
 use std::{collections::HashMap, fs::DirEntry, path::Path};
 
-#[derive(Debug, PartialEq, Clone, Deserialize)]
-pub enum Tier {
-    #[serde(rename = "1")]
-    One,
-    #[serde(rename = "2")]
-    Two,
-    #[serde(rename = "3")]
-    Three,
-}
-
 #[derive(Debug)]
 pub struct ParsedTargetInfoFile {
     pub pattern: String,
-    pub tier: Option<Tier>,
     pub maintainers: Vec<String>,
     pub sections: Vec<(String, String)>,
     pub footnotes: HashMap<String, Vec<String>>,
@@ -27,7 +16,6 @@ pub struct ParsedTargetInfoFile {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Frontmatter {
-    tier: Option<Tier>,
     #[serde(default)]
     maintainers: Vec<String>,
     #[serde(default)]
@@ -138,7 +126,6 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
     Ok(ParsedTargetInfoFile {
         pattern: name.to_owned(),
         maintainers: frontmatter.maintainers,
-        tier: frontmatter.tier,
         sections,
         footnotes: frontmatter.footnotes,
     })

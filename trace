@@ -1,0 +1,57 @@
+Attaching 3 probes...
+@fdpath[1871, 27]: /proc/sys/net/ipv6/conf/enp39s0/mtu
+@fdpath[2483, 6]: /etc/passwd
+@fdpath[3226, 103]: /proc/135816/cmdline
+@fdpath[3842, 82]: /proc/4192/status
+@fdpath[4020, 53]: /dev/video0
+@fdpath[4020, 56]: /proc/253926/stat
+@fdpath[4020, -2]: /dev/video63
+@fdpath[5494, 36]: /proc/253923/cmdline
+@fdpath[10038, 41]: /proc/154305/cmdline
+@fdpath[252060, 7]: /dev/null
+@fdpath[253926, 13]: /sys/kernel/debug/tracing/events/syscalls/sys_enter_write/id
+@fdpath[253926, 15]: /dev/null
+@fdpath[253937, 3]: /etc/localtime
+@fdpath[253937, -2]: /.envrc
+@fdpath[253943, 3]: .git/packed-refs
+@fdpath[253943, -2]: /nix/store/jgrsps4vp9243gbakax7y3mz9pkdfnfk-pcre2-10.43/lib/lib
+@fdpath[253944, 3]: .git/refs/heads/master
+@fdpath[253944, -2]: /nix/store/jgrsps4vp9243gbakax7y3mz9pkdfnfk-pcre2-10.43/lib/lib
+@fdpath[253945, 3]: .git/config
+@fdpath[253945, 4]: /nix/store/ksk3rnb0ljx8gngzk19jlmbjyvac4hw6-glibc-2.38-44/lib/g
+@fdpath[253945, -2]: /nix/store/ksk3rnb0ljx8gngzk19jlmbjyvac4hw6-glibc-2.38-44/lib/g
+@fdpath[253946, 3]: /etc/localtime
+@fdpath[253946, -2]: /.envrc
+@fdpath[253952, 3]: .git/packed-refs
+@fdpath[253952, -2]: /nix/store/jgrsps4vp9243gbakax7y3mz9pkdfnfk-pcre2-10.43/lib/lib
+@fdpath[253953, 3]: .git/refs/heads/master
+@fdpath[253953, -2]: /nix/store/jgrsps4vp9243gbakax7y3mz9pkdfnfk-pcre2-10.43/lib/lib
+@fdpath[253954, 3]: .git/config
+@fdpath[253954, 4]: /nix/store/ksk3rnb0ljx8gngzk19jlmbjyvac4hw6-glibc-2.38-44/lib/g
+@fdpath[253954, -2]: /nix/store/ksk3rnb0ljx8gngzk19jlmbjyvac4hw6-glibc-2.38-44/lib/g
+@openatpaths[1871]: /proc/sys/net/ipv6/conf/enp39s0/mtu
+@openatpaths[2485]: /etc/passwd
+@openatpaths[2486]: /etc/passwd
+@openatpaths[2487]: /etc/passwd
+@openatpaths[2488]: /etc/passwd
+@openatpaths[2489]: /etc/passwd
+@openatpaths[2490]: /etc/passwd
+@openatpaths[2491]: /etc/passwd
+@openatpaths[2492]: /etc/passwd
+@openatpaths[3226]: /proc/135816/cmdline
+@openatpaths[3842]: /proc/4192/status
+@openatpaths[4137]: /dev/video0
+@openatpaths[4149]: /proc/253926/stat
+@openatpaths[5494]: /proc/253923/cmdline
+@openatpaths[10038]: /proc/154305/cmdline
+@openatpaths[252060]: /dev/null
+@openatpaths[253926]: /sys/kernel/debug/tracing/events/syscalls/sys_enter_write/id
+@openatpaths[253937]: /.envrc
+@openatpaths[253943]: .git/packed-refs
+@openatpaths[253944]: .git/refs/heads/master
+@openatpaths[253945]: .git/config
+@openatpaths[253946]: /.envrc
+@openatpaths[253952]: .git/packed-refs
+@openatpaths[253953]: .git/refs/heads/master
+@openatpaths[253954]: .git/config
+@writer[fish, 252060]: /home/nils/projects/target-tier-docs-experiment/hello

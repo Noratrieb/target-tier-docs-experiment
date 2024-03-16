@@ -5,15 +5,25 @@ use crate::{RustcTargetInfo, TargetDocs};
 
 /// Renders a single target markdown file from the information obtained.
 pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
+    let render_header_option_bool = |bool| {
+        match bool {
+            Some(true) => "Yes",
+            Some(false) => "No",
+            None => "?",
+        }
+    };
+
     let mut doc = format!(
-        "# {}\n\n**Tier: {}**\n\n",
+        "# {}\n\n**Tier: {}**\n\n**std: {}**\n\n**host tools: {}**\n\n",
         target.name,
         match rustc_info.metadata.tier {
             Some(1) => "1",
             Some(2) => "2",
             Some(3) => "3",
             _ => "UNKNOWN",
-        }
+        },
+        render_header_option_bool(rustc_info.metadata.std),
+        render_header_option_bool(rustc_info.metadata.host_tools),
     );
 
     let mut section = |name: &str, content: &str| {
@@ -52,10 +62,7 @@ pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> St
     section("Maintainers", &maintainers_content);
 
     for section_name in crate::SECTIONS {
-        let value = target
-            .sections
-            .iter()
-            .find(|(name, _)| name == section_name);
+        let value = target.sections.iter().find(|(name, _)| name == section_name);
 
         let section_content = match value {
             Some((_, value)) => value.clone(),
@@ -93,9 +100,7 @@ fn replace_section(prev_content: &str, section_name: &str, replacement: &str) ->
         .split_once(&magic_summary_end)
         .ok_or_eyre("<!-- TARGET SECTION START --> not found")?;
 
-    let new = format!(
-        "{pre_target}{magic_summary_start}\n{replacement}\n{magic_summary_end}{post_target}"
-    );
+    let new = format!("{pre_target}{replacement}{post_target}");
     Ok(new)
 }
 
@@ -110,7 +115,7 @@ pub fn render_static(
 
     let target_list = targets
         .iter()
-        .map(|(target, _)| format!("- [{0}](targets/{0}.md)", target.name))
+        .map(|(target, _)| format!("- [{0}](platform-support/targets/{0}.md)", target.name))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -130,6 +135,16 @@ pub fn render_static(
     if !check_only {
         fs::write(platform_support_main, platform_support_main_new)
             .wrap_err("writing platform-support.md")?;
+    }
+
+    let summary = src_output.join("SUMMARY.md");
+    let summary_old = fs::read_to_string(&summary).wrap_err("reading SUMMARY.md")?;
+    // indent the list
+    let summary_new =
+        replace_section(&summary_old, "TARGET_LIST", &target_list.replace("- ", "      - "))
+            .wrap_err("replacig SUMMARY.md")?;
+    if !check_only {
+        fs::write(summary, summary_new).wrap_err("writing SUMAMRY.md")?;
     }
 
     Ok(())
