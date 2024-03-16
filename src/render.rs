@@ -1,29 +1,27 @@
 use eyre::{Context, OptionExt, Result};
 use std::{fs, path::Path};
 
-use crate::{RustcTargetInfo, TargetDocs};
+use crate::TargetInfo;
 
 /// Renders a single target markdown file from the information obtained.
-pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
-    let render_header_option_bool = |bool| {
-        match bool {
-            Some(true) => "Yes",
-            Some(false) => "No",
-            None => "?",
-        }
+pub fn render_target_md(target: &TargetInfo) -> String {
+    let render_header_option_bool = |bool| match bool {
+        Some(true) => "Yes",
+        Some(false) => "No",
+        None => "?",
     };
 
     let mut doc = format!(
         "# {}\n\n**Tier: {}**\n\n**std: {}**\n\n**host tools: {}**\n\n",
         target.name,
-        match rustc_info.metadata.tier {
+        match target.metadata.tier {
             Some(1) => "1",
             Some(2) => "2",
             Some(3) => "3",
             _ => "UNKNOWN",
         },
-        render_header_option_bool(rustc_info.metadata.std),
-        render_header_option_bool(rustc_info.metadata.host_tools),
+        render_header_option_bool(target.metadata.std),
+        render_header_option_bool(target.metadata.host_tools),
     );
 
     let mut section = |name: &str, content: &str| {
@@ -43,7 +41,7 @@ pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> St
                 .maintainers
                 .iter()
                 .map(|maintainer| {
-                    let maintainer = if maintainer.starts_with('@') && !maintainer.contains(" ") {
+                    let maintainer = if maintainer.starts_with('@') && !maintainer.contains(' ') {
                         format!(
                             "[@{0}](https://github.com/{0})",
                             maintainer.strip_prefix("@").unwrap()
@@ -62,16 +60,19 @@ pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> St
     section("Maintainers", &maintainers_content);
 
     for section_name in crate::SECTIONS {
-        let value = target.sections.iter().find(|(name, _)| name == section_name);
+        let value = target
+            .sections
+            .iter()
+            .find(|(name, _)| name == section_name);
 
         let section_content = match value {
             Some((_, value)) => value.clone(),
             None => "Unknown.".to_owned(),
         };
-        section(&section_name, &section_content);
+        section(section_name, &section_content);
     }
 
-    let cfg_text = rustc_info
+    let cfg_text = target
         .target_cfgs
         .iter()
         .map(|(key, value)| format!("- `{key}` = `{value}`"))
@@ -105,17 +106,13 @@ fn replace_section(prev_content: &str, section_name: &str, replacement: &str) ->
 }
 
 /// Renders the non-target files like `SUMMARY.md` that depend on the target.
-pub fn render_static(
-    check_only: bool,
-    src_output: &Path,
-    targets: &[(TargetDocs, RustcTargetInfo)],
-) -> Result<()> {
+pub fn render_static(check_only: bool, src_output: &Path, targets: &[TargetInfo]) -> Result<()> {
     let targets_file = src_output.join("platform-support").join("targets.md");
     let old_targets = fs::read_to_string(&targets_file).wrap_err("reading summary file")?;
 
     let target_list = targets
         .iter()
-        .map(|(target, _)| format!("- [{0}](platform-support/targets/{0}.md)", target.name))
+        .map(|target| format!("- [{0}](platform-support/targets/{0}.md)", target.name))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -140,9 +137,12 @@ pub fn render_static(
     let summary = src_output.join("SUMMARY.md");
     let summary_old = fs::read_to_string(&summary).wrap_err("reading SUMMARY.md")?;
     // indent the list
-    let summary_new =
-        replace_section(&summary_old, "TARGET_LIST", &target_list.replace("- ", "      - "))
-            .wrap_err("replacig SUMMARY.md")?;
+    let summary_new = replace_section(
+        &summary_old,
+        "TARGET_LIST",
+        &target_list.replace("- ", "      - "),
+    )
+    .wrap_err("replacig SUMMARY.md")?;
     if !check_only {
         fs::write(summary, summary_new).wrap_err("writing SUMAMRY.md")?;
     }
@@ -150,10 +150,13 @@ pub fn render_static(
     Ok(())
 }
 
-fn render_platform_support_tables(
-    content: &str,
-    targets: &[(TargetDocs, RustcTargetInfo)],
-) -> Result<String> {
+impl TargetInfo {
+    fn has_host_tools(&self) -> bool {
+        self.metadata.host_tools.unwrap_or(false)
+    }
+}
+
+fn render_platform_support_tables(content: &str, targets: &[TargetInfo]) -> Result<String> {
     let replace_table = |content, name, tier_table| -> Result<String> {
         let section_string = render_table(targets, tier_table)?;
         replace_section(content, name, &section_string).wrap_err("replacing platform support.md")
@@ -163,7 +166,7 @@ fn render_platform_support_tables(
         content,
         "TIER1HOST",
         TierTable {
-            filter: |target| target.1.metadata.tier == Some(1),
+            filter: |target| target.metadata.tier == Some(1),
             include_host: false,
             include_std: false,
         },
@@ -172,9 +175,7 @@ fn render_platform_support_tables(
         &content,
         "TIER2HOST",
         TierTable {
-            filter: |target| {
-                target.1.metadata.tier == Some(2) && target.1.metadata.host_tools.unwrap_or(false)
-            },
+            filter: |target| target.metadata.tier == Some(2) && target.has_host_tools(),
             include_host: false,
             include_std: false,
         },
@@ -183,9 +184,7 @@ fn render_platform_support_tables(
         &content,
         "TIER2",
         TierTable {
-            filter: |target| {
-                target.1.metadata.tier == Some(2) && !target.1.metadata.host_tools.unwrap_or(false)
-            },
+            filter: |target| target.metadata.tier == Some(2) && !target.has_host_tools(),
             include_host: false,
             include_std: true,
         },
@@ -194,7 +193,7 @@ fn render_platform_support_tables(
         &content,
         "TIER3",
         TierTable {
-            filter: |target| target.1.metadata.tier == Some(3),
+            filter: |target| target.metadata.tier == Some(3),
             include_host: true,
             include_std: true,
         },
@@ -212,18 +211,18 @@ fn render_table_option_bool(bool: Option<bool>) -> &'static str {
 }
 
 struct TierTable {
-    filter: fn(&(TargetDocs, RustcTargetInfo)) -> bool,
+    filter: fn(&TargetInfo) -> bool,
     include_std: bool,
     include_host: bool,
 }
 
-fn render_table(targets: &[(TargetDocs, RustcTargetInfo)], table: TierTable) -> Result<String> {
+fn render_table(targets: &[TargetInfo], table: TierTable) -> Result<String> {
     let mut rows = Vec::new();
 
-    let targets = targets.into_iter().filter(|target| (table.filter)(&target));
+    let targets = targets.iter().filter(|target| (table.filter)(target));
 
-    for (target, rustc_info) in targets {
-        let meta = &rustc_info.metadata;
+    for target in targets {
+        let meta = &target.metadata;
 
         let mut notes = meta.description.as_deref().unwrap_or("unknown").to_owned();
 

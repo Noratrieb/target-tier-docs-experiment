@@ -11,12 +11,14 @@ use eyre::{bail, Context, OptionExt, Result};
 use parse::ParsedTargetInfoFile;
 use serde::Deserialize;
 
-/// Information about a target obtained from the target_info markdown file.
-struct TargetDocs {
+/// Information about a target obtained from the markdown and rustc.
+struct TargetInfo {
     name: String,
     maintainers: Vec<String>,
     sections: Vec<(String, String)>,
     footnotes: Vec<String>,
+    target_cfgs: Vec<(String, String)>,
+    metadata: RustcTargetMetadata,
 }
 
 /// All the sections that we want every doc page to have.
@@ -56,29 +58,48 @@ fn main() -> Result<()> {
         .wrap_err("failed loading target_info")?
         .into_iter()
         .map(|info| {
-            let footnotes_used =
-                info.footnotes.iter().map(|(target, _)| (target.clone(), false)).collect();
-            TargetPatternEntry { info, used: false, footnotes_used }
+            let footnotes_used = info
+                .footnotes
+                .keys()
+                .map(|target| (target.clone(), false))
+                .collect();
+            TargetPatternEntry {
+                info,
+                used: false,
+                footnotes_used,
+            }
         })
         .collect::<Vec<_>>();
 
     eprintln!("Collecting rustc information");
-    let rustc_infos =
-        targets.iter().map(|target| rustc_target_info(&rustc, target)).collect::<Vec<_>>();
+    let rustc_infos = targets
+        .iter()
+        .map(|target| rustc_target_info(&rustc, target))
+        .collect::<Vec<_>>();
 
     let targets = targets
         .into_iter()
         .map(|target| target_doc_info(&mut info_patterns, target))
         .zip(rustc_infos)
+        .map(|(md, rustc)| TargetInfo {
+            name: md.name,
+            maintainers: md.maintainers,
+            sections: md.sections,
+            footnotes: md.footnotes,
+            target_cfgs: rustc.target_cfgs,
+            metadata: rustc.metadata,
+        })
         .collect::<Vec<_>>();
 
     eprintln!("Rendering targets check_only={check_only}");
-    let targets_dir = Path::new(output_src).join("platform-support").join("targets");
+    let targets_dir = Path::new(output_src)
+        .join("platform-support")
+        .join("targets");
     if !check_only {
         std::fs::create_dir_all(&targets_dir).wrap_err("creating platform-support/targets dir")?;
     }
-    for (info, rustc_info) in &targets {
-        let doc = render::render_target_md(info, rustc_info);
+    for info in &targets {
+        let doc = render::render_target_md(info);
 
         if !check_only {
             std::fs::write(targets_dir.join(format!("{}.md", info.name)), doc)
@@ -88,7 +109,10 @@ fn main() -> Result<()> {
 
     for target_pattern in info_patterns {
         if !target_pattern.used {
-            bail!("target pattern `{}` was never used", target_pattern.info.pattern);
+            bail!(
+                "target pattern `{}` was never used",
+                target_pattern.info.pattern
+            );
         }
 
         for footnote_target in target_pattern.info.footnotes.keys() {
@@ -115,7 +139,15 @@ struct TargetPatternEntry {
     footnotes_used: HashMap<String, bool>,
 }
 
-fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
+/// Information about a target obtained from the target_info markdown file.
+struct TargetInfoMd {
+    name: String,
+    maintainers: Vec<String>,
+    sections: Vec<(String, String)>,
+    footnotes: Vec<String>,
+}
+
+fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetInfoMd {
     let mut maintainers = Vec::new();
     let mut sections = Vec::new();
 
@@ -128,7 +160,6 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
 
             maintainers.extend_from_slice(&target_pattern.maintainers);
 
-
             for (section_name, content) in &target_pattern.sections {
                 if sections.iter().any(|(name, _)| name == section_name) {
                     panic!(
@@ -139,7 +170,9 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
             }
 
             if let Some(target_footnotes) = target_pattern.footnotes.get(target) {
-                target_pattern_entry.footnotes_used.insert(target.to_owned(), true);
+                target_pattern_entry
+                    .footnotes_used
+                    .insert(target.to_owned(), true);
 
                 if !footnotes.is_empty() {
                     panic!("target {target} is assigned metadata from more than one pattern");
@@ -149,7 +182,12 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
         }
     }
 
-    TargetDocs { name: target.to_owned(), maintainers, sections, footnotes }
+    TargetInfoMd {
+        name: target.to_owned(),
+        maintainers,
+        sections,
+        footnotes,
+    }
 }
 
 /// Information about a target obtained from rustc.
@@ -173,7 +211,7 @@ fn rustc_target_info(rustc: &Path, target: &str) -> RustcTargetInfo {
         .lines()
         .filter_map(|line| {
             if line.starts_with("target_") {
-                let Some((key, value)) = line.split_once("=") else {
+                let Some((key, value)) = line.split_once('=') else {
                     // For example `unix`
                     return None;
                 };
@@ -191,12 +229,21 @@ fn rustc_target_info(rustc: &Path, target: &str) -> RustcTargetInfo {
 
     let json_spec = rustc_stdout(
         rustc,
-        &["-Zunstable-options", "--print", "target-spec-json", "--target", target],
+        &[
+            "-Zunstable-options",
+            "--print",
+            "target-spec-json",
+            "--target",
+            target,
+        ],
     );
     let spec = serde_json::from_str::<TargetJson>(&json_spec)
         .expect("parsing --print target-spec-json for metadata");
 
-    RustcTargetInfo { target_cfgs, metadata: spec.metadata }
+    RustcTargetInfo {
+        target_cfgs,
+        metadata: spec.metadata,
+    }
 }
 
 fn rustc_stdout(rustc: &Path, args: &[&str]) -> String {

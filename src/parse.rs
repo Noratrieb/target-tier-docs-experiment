@@ -70,7 +70,9 @@ fn load_single_target_info(entry: &DirEntry) -> Result<ParsedTargetInfoFile> {
 fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
     let mut frontmatter_splitter = content.split("---\n");
 
-    let frontmatter = frontmatter_splitter.nth(1).ok_or_eyre("missing frontmatter")?;
+    let frontmatter = frontmatter_splitter
+        .nth(1)
+        .ok_or_eyre("missing frontmatter")?;
 
     let frontmatter_line_count = frontmatter.lines().count() + 2; // 2 from ---
 
@@ -86,7 +88,7 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
         let number = frontmatter_line_count + idx + 1; // 1 because "line numbers" are off by 1
         if line.starts_with("```") {
             in_codeblock ^= true; // toggle
-        } else if line.starts_with("#") {
+        } else if line.starts_with('#') {
             if in_codeblock {
                 match sections.last_mut() {
                     Some((_, content)) => {
@@ -121,7 +123,9 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
         }
     }
 
-    sections.iter_mut().for_each(|section| section.1 = section.1.trim().to_owned());
+    sections
+        .iter_mut()
+        .for_each(|section| section.1 = section.1.trim().to_owned());
 
     Ok(ParsedTargetInfoFile {
         pattern: name.to_owned(),

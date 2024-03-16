@@ -1,5 +1,3 @@
-use crate::parse::Tier;
-
 #[test]
 fn no_frontmatter() {
     let name = "archlinux-unknown-linux-gnu.md"; // arch linux is an arch, right?
@@ -38,7 +36,6 @@ fn parse_correctly() {
     let name = "cat-unknown-linux-gnu.md";
     let content = r#"
 ---
-tier: "1" # first-class cats
 maintainers: ["who maintains the cat?"]
 ---
 ## Requirements
@@ -59,7 +56,6 @@ But it should be possible.
 
     assert_eq!(info.maintainers, vec!["who maintains the cat?"]);
     assert_eq!(info.pattern, name);
-    assert_eq!(info.tier, Some(Tier::One));
     assert_eq!(
         info.sections,
         vec![
