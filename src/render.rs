@@ -1,27 +1,18 @@
 use eyre::{Context, OptionExt, Result};
 use std::{fs, path::Path};
 
-use crate::{
-    parse::{Footnote, Tier, TriStateBool},
-    RustcTargetInfo, TargetDocs,
-};
-
-impl TargetDocs {
-    fn has_host_tools(&self) -> bool {
-        self.metadata.as_ref().map_or(false, |meta| meta.host == TriStateBool::True)
-    }
-}
+use crate::{RustcTargetInfo, TargetDocs};
 
 /// Renders a single target markdown file from the information obtained.
 pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> String {
     let mut doc = format!(
         "# {}\n\n**Tier: {}**\n\n",
         target.name,
-        match target.tier {
-            Some(Tier::One) => "1",
-            Some(Tier::Two) => "2",
-            Some(Tier::Three) => "3",
-            None => "UNKNOWN",
+        match rustc_info.metadata.tier {
+            Some(1) => "1",
+            Some(2) => "2",
+            Some(3) => "3",
+            _ => "UNKNOWN",
         }
     );
 
@@ -61,7 +52,10 @@ pub fn render_target_md(target: &TargetDocs, rustc_info: &RustcTargetInfo) -> St
     section("Maintainers", &maintainers_content);
 
     for section_name in crate::SECTIONS {
-        let value = target.sections.iter().find(|(name, _)| name == section_name);
+        let value = target
+            .sections
+            .iter()
+            .find(|(name, _)| name == section_name);
 
         let section_content = match value {
             Some((_, value)) => value.clone(),
@@ -141,12 +135,6 @@ pub fn render_static(
     Ok(())
 }
 
-impl Footnote {
-    fn reference(&self) -> String {
-        format!("[^{}]", self.name)
-    }
-}
-
 fn render_platform_support_tables(
     content: &str,
     targets: &[(TargetDocs, RustcTargetInfo)],
@@ -160,7 +148,7 @@ fn render_platform_support_tables(
         content,
         "TIER1HOST",
         TierTable {
-            filter: |target| target.tier == Some(Tier::One),
+            filter: |target| target.1.metadata.tier == Some(1),
             include_host: false,
             include_std: false,
         },
@@ -169,7 +157,9 @@ fn render_platform_support_tables(
         &content,
         "TIER2HOST",
         TierTable {
-            filter: |target| target.tier == Some(Tier::Two) && target.has_host_tools(),
+            filter: |target| {
+                target.1.metadata.tier == Some(2) && target.1.metadata.host_tools.unwrap_or(false)
+            },
             include_host: false,
             include_std: false,
         },
@@ -178,7 +168,9 @@ fn render_platform_support_tables(
         &content,
         "TIER2",
         TierTable {
-            filter: |target| target.tier == Some(Tier::Two) && !target.has_host_tools(),
+            filter: |target| {
+                target.1.metadata.tier == Some(2) && !target.1.metadata.host_tools.unwrap_or(false)
+            },
             include_host: false,
             include_std: true,
         },
@@ -187,7 +179,7 @@ fn render_platform_support_tables(
         &content,
         "TIER3",
         TierTable {
-            filter: |target| target.tier == Some(Tier::Three),
+            filter: |target| target.1.metadata.tier == Some(3),
             include_host: true,
             include_std: true,
         },
@@ -196,49 +188,50 @@ fn render_platform_support_tables(
     Ok(content)
 }
 
-fn render_table_tri_state_bool(bool: TriStateBool) -> &'static str {
+fn render_table_option_bool(bool: Option<bool>) -> &'static str {
     match bool {
-        TriStateBool::True => "✓",
-        TriStateBool::False => " ",
-        TriStateBool::Unknown => "?",
+        Some(true) => "✓",
+        Some(false) => " ",
+        None => "?",
     }
 }
 
 struct TierTable {
-    filter: fn(&TargetDocs) -> bool,
+    filter: fn(&(TargetDocs, RustcTargetInfo)) -> bool,
     include_std: bool,
     include_host: bool,
 }
 
 fn render_table(targets: &[(TargetDocs, RustcTargetInfo)], table: TierTable) -> Result<String> {
     let mut rows = Vec::new();
-    let mut all_footnotes = Vec::new();
 
-    let targets = targets.into_iter().filter(|target| (table.filter)(&target.0));
+    let targets = targets.into_iter().filter(|target| (table.filter)(&target));
 
-    for (target, _) in targets {
-        let meta = target.metadata.as_ref();
+    for (target, rustc_info) in targets {
+        let meta = &rustc_info.metadata;
 
-        let mut notes = meta.map(|meta| meta.notes.as_str()).unwrap_or("unknown").to_owned();
+        let mut notes = meta.description.as_deref().unwrap_or("unknown").to_owned();
 
-        if meta.map_or(false, |meta| !meta.footnotes.is_empty()) {
-            let footnotes = &meta.unwrap().footnotes;
-            all_footnotes.extend(footnotes);
-            let footnotes_str =
-                footnotes.iter().map(|footnote| footnote.reference()).collect::<Vec<_>>().join(" ");
+        if !target.footnotes.is_empty() {
+            let footnotes_str = target
+                .footnotes
+                .iter()
+                .map(|footnote| format!("[^{}]", footnote))
+                .collect::<Vec<_>>()
+                .join(" ");
 
             notes = format!("{notes} {footnotes_str}");
         }
 
         let std = if table.include_std {
-            let std = meta.map(|meta| render_table_tri_state_bool(meta.std)).unwrap_or("?");
+            let std = render_table_option_bool(meta.std);
             format!(" | {std}")
         } else {
             String::new()
         };
 
         let host = if table.include_host {
-            let host = meta.map(|meta| render_table_tri_state_bool(meta.host)).unwrap_or("?");
+            let host = render_table_option_bool(meta.host_tools);
             format!(" | {host}")
         } else {
             String::new()
@@ -250,14 +243,7 @@ fn render_table(targets: &[(TargetDocs, RustcTargetInfo)], table: TierTable) -> 
         ));
     }
 
-    let mut result = rows.join("\n");
-
-    for footnote in all_footnotes {
-        result.push_str("\n\n");
-        result.push_str(&footnote.reference());
-        result.push_str(": ");
-        result.push_str(&footnote.content);
-    }
+    let result = rows.join("\n");
 
     Ok(result)
 }

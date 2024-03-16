@@ -86,15 +86,8 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
 
     let frontmatter_line_count = frontmatter.lines().count() + 2; // 2 from ---
 
-    let mut frontmatter =
+    let frontmatter =
         serde_yaml::from_str::<Frontmatter>(frontmatter).wrap_err("invalid frontmatter")?;
-
-    frontmatter.metadata.iter_mut().for_each(|meta| {
-        meta.footnotes.iter_mut().for_each(|footnote| {
-            footnote.content = footnote.content.replace("\r\n", " ").replace("\n", " ")
-        })
-    });
-    let frontmatter = frontmatter;
 
     let body = frontmatter_splitter.next().ok_or_eyre("no body")?;
 

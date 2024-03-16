@@ -2,12 +2,13 @@ mod parse;
 mod render;
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use eyre::{bail, Context, OptionExt, Result};
-use parse::{Footnote, ParsedTargetInfoFile, Tier, TriStateBool};
+use parse::ParsedTargetInfoFile;
 use serde::Deserialize;
 
 /// Information about a target obtained from the target_info markdown file.
@@ -52,14 +53,24 @@ fn main() -> Result<()> {
         .wrap_err("failed loading target_info")?
         .into_iter()
         .map(|info| {
-            let metadata_used = vec![false; info.metadata.len()];
-            TargetPatternEntry { info, used: false, footnotes_used: metadata_used }
+            let footnotes_used = info
+                .footnotes
+                .iter()
+                .map(|(target, _)| (target.clone(), false))
+                .collect();
+            TargetPatternEntry {
+                info,
+                used: false,
+                footnotes_used,
+            }
         })
         .collect::<Vec<_>>();
 
     eprintln!("Collecting rustc information");
-    let rustc_infos =
-        targets.iter().map(|target| rustc_target_info(&rustc, target)).collect::<Vec<_>>();
+    let rustc_infos = targets
+        .iter()
+        .map(|target| rustc_target_info(&rustc, target))
+        .collect::<Vec<_>>();
 
     let targets = targets
         .into_iter()
@@ -68,7 +79,9 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
 
     eprintln!("Rendering targets check_only={check_only}");
-    let targets_dir = Path::new(output_src).join("platform-support").join("targets");
+    let targets_dir = Path::new(output_src)
+        .join("platform-support")
+        .join("targets");
     if !check_only {
         std::fs::create_dir_all(&targets_dir).wrap_err("creating platform-support/targets dir")?;
     }
@@ -83,17 +96,19 @@ fn main() -> Result<()> {
 
     for target_pattern in info_patterns {
         if !target_pattern.used {
-            bail!("target pattern `{}` was never used", target_pattern.info.pattern);
+            bail!(
+                "target pattern `{}` was never used",
+                target_pattern.info.pattern
+            );
         }
 
-        for (used, meta) in
-            std::iter::zip(target_pattern.footnotes_used, target_pattern.info.metadata)
-        {
+        for footnote_target in target_pattern.info.footnotes.keys() {
+            let used = target_pattern.footnotes_used[footnote_target];
             if !used {
                 bail!(
                     "in target pattern `{}`, the footnotes for target `{}` were never used",
                     target_pattern.info.pattern,
-                    meta.target
+                    footnote_target,
                 );
             }
         }
@@ -108,7 +123,7 @@ fn main() -> Result<()> {
 struct TargetPatternEntry {
     info: ParsedTargetInfoFile,
     used: bool,
-    footnotes_used: Vec<bool>,
+    footnotes_used: HashMap<String, bool>,
 }
 
 fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> TargetDocs {
@@ -116,7 +131,6 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
     let mut maintainers = Vec::new();
     let mut sections = Vec::new();
 
-    let mut metadata = None;
     let mut footnotes = Vec::new();
 
     for target_pattern_entry in info_patterns {
@@ -145,32 +159,24 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
             }
 
             if let Some(target_footnotes) = target_pattern.footnotes.get(target) {
-                target_pattern_entry.footnotes_used[i] = true;
+                target_pattern_entry
+                    .footnotes_used
+                    .insert(target.to_owned(), true);
 
                 if !footnotes.is_empty() {
                     panic!("target {target} is assigned metadata from more than one pattern");
                 }
                 footnotes = target_footnotes.clone();
             }
-
-            for (i, metadata_pattern) in target_pattern.metadata.iter().enumerate() {
-                if metadata_pattern.target == target {
-                    target_pattern_entry.footnotes_used[i] = true;
-                    if metadata.is_some() {
-                        panic!("target {target} is assigned metadata from more than one pattern");
-                    }
-                    metadata = Some(TargetMetadata {
-                        notes: metadata_pattern.notes.clone(),
-                        host: metadata_pattern.host.clone(),
-                        std: metadata_pattern.std.clone(),
-                        footnotes: metadata_pattern.footnotes.clone(),
-                    });
-                }
-            }
         }
     }
 
-    TargetDocs { name: target.to_owned(), maintainers, sections, footnotes }
+    TargetDocs {
+        name: target.to_owned(),
+        maintainers,
+        sections,
+        footnotes,
+    }
 }
 
 /// Information about a target obtained from rustc.
@@ -212,11 +218,21 @@ fn rustc_target_info(rustc: &Path, target: &str) -> RustcTargetInfo {
 
     let json_spec = rustc_stdout(
         rustc,
-        &["-Zunstable-options", "--print", "target-spec-json", "--target", target],
+        &[
+            "-Zunstable-options",
+            "--print",
+            "target-spec-json",
+            "--target",
+            target,
+        ],
     );
-    let spec = serde_json::from_str::<TargetJson>(&json_spec);
+    let spec = serde_json::from_str::<TargetJson>(&json_spec)
+        .expect("parsing --print target-spec-json for metadata");
 
-    RustcTargetInfo { target_cfgs, metadata: spec.metadata }
+    RustcTargetInfo {
+        target_cfgs,
+        metadata: spec.metadata,
+    }
 }
 
 fn rustc_stdout(rustc: &Path, args: &[&str]) -> String {
