@@ -58,24 +58,15 @@ fn main() -> Result<()> {
         .wrap_err("failed loading target_info")?
         .into_iter()
         .map(|info| {
-            let footnotes_used = info
-                .footnotes
-                .keys()
-                .map(|target| (target.clone(), false))
-                .collect();
-            TargetPatternEntry {
-                info,
-                used: false,
-                footnotes_used,
-            }
+            let footnotes_used =
+                info.footnotes.keys().map(|target| (target.clone(), false)).collect();
+            TargetPatternEntry { info, used: false, footnotes_used }
         })
         .collect::<Vec<_>>();
 
     eprintln!("Collecting rustc information");
-    let rustc_infos = targets
-        .iter()
-        .map(|target| rustc_target_info(&rustc, target))
-        .collect::<Vec<_>>();
+    let rustc_infos =
+        targets.iter().map(|target| rustc_target_info(&rustc, target)).collect::<Vec<_>>();
 
     let targets = targets
         .into_iter()
@@ -92,9 +83,7 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
 
     eprintln!("Rendering targets check_only={check_only}");
-    let targets_dir = Path::new(output_src)
-        .join("platform-support")
-        .join("targets");
+    let targets_dir = Path::new(output_src).join("platform-support").join("targets");
     if !check_only {
         std::fs::create_dir_all(&targets_dir).wrap_err("creating platform-support/targets dir")?;
     }
@@ -109,10 +98,7 @@ fn main() -> Result<()> {
 
     for target_pattern in info_patterns {
         if !target_pattern.used {
-            bail!(
-                "target pattern `{}` was never used",
-                target_pattern.info.pattern
-            );
+            bail!("target pattern `{}` was never used", target_pattern.info.pattern);
         }
 
         for footnote_target in target_pattern.info.footnotes.keys() {
@@ -170,9 +156,7 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
             }
 
             if let Some(target_footnotes) = target_pattern.footnotes.get(target) {
-                target_pattern_entry
-                    .footnotes_used
-                    .insert(target.to_owned(), true);
+                target_pattern_entry.footnotes_used.insert(target.to_owned(), true);
 
                 if !footnotes.is_empty() {
                     panic!("target {target} is assigned metadata from more than one pattern");
@@ -182,12 +166,7 @@ fn target_doc_info(info_patterns: &mut [TargetPatternEntry], target: &str) -> Ta
         }
     }
 
-    TargetInfoMd {
-        name: target.to_owned(),
-        maintainers,
-        sections,
-        footnotes,
-    }
+    TargetInfoMd { name: target.to_owned(), maintainers, sections, footnotes }
 }
 
 /// Information about a target obtained from rustc.
@@ -229,21 +208,12 @@ fn rustc_target_info(rustc: &Path, target: &str) -> RustcTargetInfo {
 
     let json_spec = rustc_stdout(
         rustc,
-        &[
-            "-Zunstable-options",
-            "--print",
-            "target-spec-json",
-            "--target",
-            target,
-        ],
+        &["-Zunstable-options", "--print", "target-spec-json", "--target", target],
     );
     let spec = serde_json::from_str::<TargetJson>(&json_spec)
         .expect("parsing --print target-spec-json for metadata");
 
-    RustcTargetInfo {
-        target_cfgs,
-        metadata: spec.metadata,
-    }
+    RustcTargetInfo { target_cfgs, metadata: spec.metadata }
 }
 
 fn rustc_stdout(rustc: &Path, args: &[&str]) -> String {

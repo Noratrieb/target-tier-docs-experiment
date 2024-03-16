@@ -74,3 +74,26 @@ But it should be possible.
         ]
     );
 }
+
+#[test]
+fn backticks() {
+    let name = "microservices-unknown-linux-gnu"; // microservices are my favourite architecture
+    let content = r#"
+---
+---
+
+## Testing
+
+```text
+# hello world
+```
+    "#;
+
+    let info = super::parse_file(name, content).unwrap();
+
+    assert_eq!(info.pattern, name);
+    assert_eq!(
+        info.sections,
+        vec![("Testing".to_owned(), "```text\n# hello world\n```".to_owned(),),]
+    );
+}

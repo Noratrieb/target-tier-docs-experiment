@@ -60,10 +60,7 @@ pub fn render_target_md(target: &TargetInfo) -> String {
     section("Maintainers", &maintainers_content);
 
     for section_name in crate::SECTIONS {
-        let value = target
-            .sections
-            .iter()
-            .find(|(name, _)| name == section_name);
+        let value = target.sections.iter().find(|(name, _)| name == section_name);
 
         let section_content = match value {
             Some((_, value)) => value.clone(),
@@ -137,12 +134,9 @@ pub fn render_static(check_only: bool, src_output: &Path, targets: &[TargetInfo]
     let summary = src_output.join("SUMMARY.md");
     let summary_old = fs::read_to_string(&summary).wrap_err("reading SUMMARY.md")?;
     // indent the list
-    let summary_new = replace_section(
-        &summary_old,
-        "TARGET_LIST",
-        &target_list.replace("- ", "      - "),
-    )
-    .wrap_err("replacig SUMMARY.md")?;
+    let summary_new =
+        replace_section(&summary_old, "TARGET_LIST", &target_list.replace("- ", "      - "))
+            .wrap_err("replacig SUMMARY.md")?;
     if !check_only {
         fs::write(summary, summary_new).wrap_err("writing SUMAMRY.md")?;
     }

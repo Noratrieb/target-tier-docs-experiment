@@ -70,9 +70,7 @@ fn load_single_target_info(entry: &DirEntry) -> Result<ParsedTargetInfoFile> {
 fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
     let mut frontmatter_splitter = content.split("---\n");
 
-    let frontmatter = frontmatter_splitter
-        .nth(1)
-        .ok_or_eyre("missing frontmatter")?;
+    let frontmatter = frontmatter_splitter.nth(1).ok_or_eyre("missing frontmatter")?;
 
     let frontmatter_line_count = frontmatter.lines().count() + 2; // 2 from ---
 
@@ -86,20 +84,27 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
 
     for (idx, line) in body.lines().enumerate() {
         let number = frontmatter_line_count + idx + 1; // 1 because "line numbers" are off by 1
+
+        let push_line = |sections: &mut Vec<(String, String)>, line| {
+            match sections.last_mut() {
+                Some((_, content)) => {
+                    content.push_str(line);
+                    content.push('\n');
+                }
+                None if line.trim().is_empty() => {}
+                None => {
+                    bail!("line {number} with content not allowed before the first heading")
+                }
+            }
+            Ok(())
+        };
+
         if line.starts_with("```") {
             in_codeblock ^= true; // toggle
+            push_line(&mut sections, line)?;
         } else if line.starts_with('#') {
             if in_codeblock {
-                match sections.last_mut() {
-                    Some((_, content)) => {
-                        content.push_str(line);
-                        content.push('\n');
-                    }
-                    None if line.trim().is_empty() => {}
-                    None => {
-                        bail!("line {number} with content not allowed before the first heading")
-                    }
-                }
+                push_line(&mut sections, line)?;
             } else if let Some(header) = line.strip_prefix("## ") {
                 if !crate::SECTIONS.contains(&header) {
                     bail!(
@@ -112,20 +117,11 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
                 bail!("on line {number}, the only allowed headings are `## `: `{line}`");
             }
         } else {
-            match sections.last_mut() {
-                Some((_, content)) => {
-                    content.push_str(line);
-                    content.push('\n');
-                }
-                None if line.trim().is_empty() => {}
-                None => bail!("line with content not allowed before the first heading"),
-            }
+            push_line(&mut sections, line)?;
         }
     }
 
-    sections
-        .iter_mut()
-        .for_each(|section| section.1 = section.1.trim().to_owned());
+    sections.iter_mut().for_each(|section| section.1 = section.1.trim().to_owned());
 
     Ok(ParsedTargetInfoFile {
         pattern: name.to_owned(),
