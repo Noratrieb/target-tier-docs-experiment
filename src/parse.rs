@@ -2,7 +2,7 @@
 
 use eyre::{bail, OptionExt, Result, WrapErr};
 use serde::Deserialize;
-use std::{fs::DirEntry, path::Path};
+use std::{collections::HashMap, fs::DirEntry, path::Path};
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
 pub enum Tier {
@@ -20,9 +20,10 @@ pub struct ParsedTargetInfoFile {
     pub tier: Option<Tier>,
     pub maintainers: Vec<String>,
     pub sections: Vec<(String, String)>,
-    pub metadata: Vec<ParsedTargetMetadata>,
+    pub footnotes: HashMap<String, Vec<String>>,
 }
 
+// IMPORTANT: This is also documented in the README, keep it in sync.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Frontmatter {
@@ -30,27 +31,19 @@ struct Frontmatter {
     #[serde(default)]
     maintainers: Vec<String>,
     #[serde(default)]
-    metadata: Vec<ParsedTargetMetadata>,
+    footnotes: HashMap<String, Vec<String>>,
 }
 
+// IMPORTANT: This is also documented in the README, keep it in sync.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParsedTargetMetadata {
-    pub pattern: String,
-    pub notes: String,
-    pub std: TriStateBool,
-    pub host: TriStateBool,
+pub struct TargetFootnotes {
+    pub target: String,
     #[serde(default)]
-    pub footnotes: Vec<Footnote>,
+    pub footnotes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Footnote {
-    pub name: String,
-    pub content: String,
-}
-
+// IMPORTANT: This is also documented in the README, keep it in sync.
 #[derive(Debug, PartialEq, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriStateBool {
@@ -89,9 +82,7 @@ fn load_single_target_info(entry: &DirEntry) -> Result<ParsedTargetInfoFile> {
 fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
     let mut frontmatter_splitter = content.split("---\n");
 
-    let frontmatter = frontmatter_splitter
-        .nth(1)
-        .ok_or_eyre("missing frontmatter")?;
+    let frontmatter = frontmatter_splitter.nth(1).ok_or_eyre("missing frontmatter")?;
 
     let frontmatter_line_count = frontmatter.lines().count() + 2; // 2 from ---
 
@@ -149,99 +140,16 @@ fn parse_file(name: &str, content: &str) -> Result<ParsedTargetInfoFile> {
         }
     }
 
-    sections
-        .iter_mut()
-        .for_each(|section| section.1 = section.1.trim().to_owned());
+    sections.iter_mut().for_each(|section| section.1 = section.1.trim().to_owned());
 
     Ok(ParsedTargetInfoFile {
         pattern: name.to_owned(),
         maintainers: frontmatter.maintainers,
         tier: frontmatter.tier,
         sections,
-        metadata: frontmatter.metadata,
+        footnotes: frontmatter.footnotes,
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::parse::Tier;
-
-    #[test]
-    fn no_frontmatter() {
-        let name = "archlinux-unknown-linux-gnu.md"; // arch linux is an arch, right?
-        let content = "";
-        assert!(super::parse_file(name, content).is_err());
-    }
-
-    #[test]
-    fn invalid_section() {
-        let name = "6502-nintendo-nes.md";
-        let content = "
----
----
-
-## Not A Real Section
-";
-
-        assert!(super::parse_file(name, content).is_err());
-    }
-
-    #[test]
-    fn wrong_header() {
-        let name = "x86_64-known-linux-gnu.md";
-        let content = "
----
----
-
-# x86_64-known-linux-gnu
-";
-
-        assert!(super::parse_file(name, content).is_err());
-    }
-
-    #[test]
-    fn parse_correctly() {
-        let name = "cat-unknown-linux-gnu.md";
-        let content = r#"
----
-tier: "1" # first-class cats
-maintainers: ["who maintains the cat?"]
----
-## Requirements
-
-This target mostly just meows and doesn't do much.
-
-## Testing
-
-You can pet the cat and it might respond positively.
-
-## Cross compilation
-
-If you're on a dog system, there might be conflicts with the cat, be careful.
-But it should be possible.
-        "#;
-
-        let info = super::parse_file(name, content).unwrap();
-
-        assert_eq!(info.maintainers, vec!["who maintains the cat?"]);
-        assert_eq!(info.pattern, name);
-        assert_eq!(info.tier, Some(Tier::One));
-        assert_eq!(
-            info.sections,
-            vec![
-                (
-                    "Requirements".to_owned(),
-                    "This target mostly just meows and doesn't do much.".to_owned(),
-                ),
-                (
-                    "Testing".to_owned(),
-                    "You can pet the cat and it might respond positively.".to_owned(),
-                ),
-                (
-                    "Cross compilation".to_owned(),
-                    "If you're on a dog system, there might be conflicts with the cat, be careful.\nBut it should be possible.".to_owned(),
-                ),
-            ]
-        );
-    }
-}
+mod tests;

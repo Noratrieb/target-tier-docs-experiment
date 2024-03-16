@@ -1,26 +1,57 @@
-# target tier docs experiment
+# target-docs
 
-Experiment with automatically generating target tier docs.
+This tool generates target documentation for all targets in the rustc book.
 
-**View the deployment on <https://nilstrieb.github.io/target-tier-docs-experiment/>**
+To achieve this, it uses a list of input markdown files provided in `src/doc/rustc/target_infos`. These files follow a strict format.
+Every file covers a glob pattern of targets according to its file name.
 
-## Problems
+For every rustc target, we iterate through all the target infos and find matching globs.
+When a glob matches, it extracts the h2 markdown sections and saves them for the target.
 
-Currenly, the [target tier docs](https://doc.rust-lang.org/rustc/platform-support.html) are hard to navigate.
-If you want to find information about a specific target, you first need to do some glob-search yourself and then also hope
-that the target actually exists. This is super annoying (`:(`). Additionally, some targets are completely missing and there
-is no reason to believe that the documentation won't suddenly start being out of date.
-Pages are also inconsistent about which sections exist and which ones don't.
+In the end, a page is generated for every target using these sections.
+Sections that are not provided are stubbed out. Currently, the sections are
 
-## Solution
+- Overview
+- Requirements
+- Testing
+- Building the target
+- Cross compilation
+- Building Rust programs
 
-Enter: adding yet another preprocessing step.
+In addition to the markdown sections, we also have extra data about the targets.
+This is achieved through YAML frontmatter.
 
-By adding yet another preprocessing step, we can solve all these problems.
-- Have a *dedicated* page for *every single* target including information about maintainers etc. 
-  This makes it super easy to find things when there are problems.
-- Ensure that no target is completely undocumented, at least having a stub page pointing out the undocumentedness
-- Error when there is documentation that is not needed anymore, for example a removed target
-- Still keep the nice and easy-to-organize glob structure in the source
-- Use a unified structure for all the pages
-- This also allows us to put more dynamic values into the docs. For example, I put `--print cfg` there, isn't that pretty!?
+The frontmatter follows the following format:
+
+```yaml
+tier: "1"
+maintainers: ["@someone"]
+metadata:
+    - target: "i686-pc-windows-gnu"
+      notes: "32-bit MinGW (Windows 7+)"
+      std: true
+      host: true
+      footnotes:
+        - name: "x86_32-floats-return-ABI"
+          content: |
+            Due to limitations of the C ABI, floating-point support on `i686` targets is non-compliant:
+            floating-point return values are passed via an x87 register, so NaN payload bits can be lost.
+            See [issue #114479][https://github.com/rust-lang/rust/issues/114479].
+        - name: "windows-support"
+          content: "Only Windows 10 currently undergoes automated testing. Earlier versions of Windows rely on testing and support from the community."
+```
+
+The top level keys are:
+
+- `tier` (optional): `1`, `2` or `3`
+- `maintainers` (optional): list of strings
+
+There is also `metadata`, which is specific to every single target and not just a target "group" (the glob).
+
+`metadata` has the following properties:
+
+- `target`: the target name
+- `notes`: a string containing a short description of the target for the table
+- `std`: `true`, `false`, `unknown`, whether the target has `std`
+- `host`: `true`, `false`, `unknown`, whether the target has host tools
+- `footnotes` (optional): a list of footnotes, where every footnote has a `name` and `content`. These are used in the table.
